@@ -1,0 +1,37 @@
+# ---- OS / IDE ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.log
+
+# ---- Node / frontend ----
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Java / backend ----
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+backend/.env
+*.class
+*.jar
+*.war
+*.ear
+
+# ---- Local infra ----
+docker-data/
+data/
+.env
+.env.local

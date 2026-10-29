@@ -1,0 +1,104 @@
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: ai-video-studio-backend
+  config:
+    # 自动读取 backend/.env（不存在则忽略）；系统环境变量优先级更高。
+    # 从 backend 目录启动用第一个，从仓库根目录启动用第二个。
+    import:
+      - optional:file:./backend/.env[.properties]
+  datasource:
+    # 外部数据库可整体覆盖 DB_URL（含 SSL、超时等参数）；只改主机时用 DB_HOST / DB_PORT / DB_NAME
+    url: ${DB_URL:jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:ai_video}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:aivideo}
+    password: ${DB_PASSWORD:aivideo123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    druid:
+      initial-size: ${DB_POOL_INITIAL_SIZE:5}
+      min-idle: ${DB_POOL_MIN_IDLE:5}
+      max-active: ${DB_POOL_MAX_ACTIVE:20}
+      max-wait: ${DB_POOL_MAX_WAIT:60000}
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+      time-between-eviction-runs-millis: 60000
+      min-evictable-idle-time-millis: 300000
+      pool-prepared-statements: true
+      max-pool-prepared-statement-per-connection-size: 20
+      # 仅启用 stat；wall / mergeSql 需要额外引入 Guava，按需再开
+      filters: stat
+      connection-properties: druid.stat.slowSqlMillis=2000
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # Redis 6+ ACL 用户；只用 requirepass 时留空
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: 2s
+  sql:
+    init:
+      # 外部数据库首次联通可设 DB_INIT_MODE=always，自动执行 classpath:db/schema.sql（幂等）
+      mode: ${DB_INIT_MODE:never}
+      schema-locations: classpath:db/schema.sql
+  jackson:
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: method
+
+app:
+  jwt:
+    # 本地默认值仅用于开发，生产必须通过 JWT_SECRET 覆盖
+    secret: ${JWT_SECRET:aivideo-studio-dev-secret-key-please-change-in-production-2026}
+    issuer: ai-video-studio
+    access-token-ttl: ${JWT_ACCESS_TTL:PT30M}
+    refresh-token-ttl: ${JWT_REFRESH_TTL:P7D}
+  # redis | memory（memory 仅用于无 Redis 的本地演示）
+  token-store: ${TOKEN_STORE:redis}
+  cors:
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173
+  storage:
+    provider: ${STORAGE_PROVIDER:minio}
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket: ${MINIO_BUCKET:aivideo}
+  agentscope:
+    # 默认关闭：使用 Mock ModelProvider，不发起真实模型调用
+    enabled: ${AGENTSCOPE_ENABLED:false}
+    model: ${AGENTSCOPE_MODEL:dashscope:qwen-plus}
+    max-history-messages: 20
+    sys-prompt: >-
+      你是 AI Video Studio 的视频创作助手。你擅长把用户的创意拆解为剧本、分镜和镜头参数，
+      并调用工具 generateStoryboard / generateVideoClip 协助完成创作。
+      当前视频生成能力仍在开发中，涉及生成视频时请明确告知用户这是占位能力。
+
+logging:
+  level:
+    com.aivideo: info
+    org.springframework.security: warn

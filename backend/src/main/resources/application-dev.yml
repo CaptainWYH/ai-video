@@ -1,0 +1,21 @@
+# 本地无 Docker 烟测配置：H2（MySQL 兼容模式）+ 内存 TokenStore
+# 启动：mvn spring-boot:run -Dspring-boot.run.profiles=dev
+spring:
+  datasource:
+    url: jdbc:h2:mem:aivideo;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+    druid:
+      initial-size: 2
+      min-idle: 2
+      max-active: 5
+      max-wait: 10000
+      filters: stat
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema-h2.sql
+
+app:
+  token-store: memory

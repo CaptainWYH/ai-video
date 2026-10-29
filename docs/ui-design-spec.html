@@ -1,0 +1,3519 @@
+<title>AI Video Studio 设计规范</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d10;
+    --surface: #12151a;
+    --raised: #191d24;
+    --line: #272c35;
+    --line-soft: #1d2229;
+    --text: #f2eee6;
+    --text-2: #a7adb7;
+    --text-3: #8a919c;
+    --amber: #f2b35c;
+    --amber-bright: #ffc978;
+    --amber-ink: #1a1206;
+    --teal: #75d8d2;
+    --success: #66d19e;
+    --danger: #ff746c;
+    --focus: rgba(242, 179, 92, 0.38);
+    --display: "Noto Serif SC", "Songti SC", "STSong", serif;
+    --sans: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+    --max: 1320px;
+    --toc: 200px;
+    --shadow-float: 0 24px 80px rgba(0, 0, 0, 0.55);
+    --shadow-modal: 0 32px 120px rgba(0, 0, 0, 0.65);
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    background: var(--bg);
+  }
+
+  body {
+    margin: 0;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    background:
+      radial-gradient(1100px 620px at 88% -8%, rgba(242, 179, 92, 0.075), transparent 62%),
+      radial-gradient(820px 520px at -5% 52%, rgba(117, 216, 210, 0.04), transparent 64%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.016) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.016) 1px, transparent 1px);
+    background-size: 80px 80px;
+    mask-image: linear-gradient(to bottom, black, transparent 82%);
+  }
+
+  .page {
+    position: relative;
+    z-index: 1;
+    max-width: var(--max);
+    margin: 0 auto;
+  }
+
+  ::selection {
+    background: rgba(242, 179, 92, 0.26);
+    color: var(--text);
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  a:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 3px;
+  }
+
+  svg {
+    display: block;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    color: var(--amber);
+  }
+
+  .mono {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    padding-block: 26px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+  }
+
+  .brand-mark {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid rgba(242, 179, 92, 0.32);
+    border-radius: 8px;
+    color: var(--amber);
+    background: rgba(242, 179, 92, 0.06);
+  }
+
+  .brand-mark svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .brand-name {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .topnav {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    margin-left: auto;
+  }
+
+  .topnav a {
+    font-size: 12px;
+    color: var(--text-3);
+    transition: color 140ms ease;
+  }
+
+  .topnav a:hover {
+    color: var(--text);
+  }
+
+  .top-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-left: 22px;
+    border-left: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+
+  .top-meta strong {
+    font-weight: 500;
+    color: var(--amber);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.12fr) minmax(280px, 0.88fr);
+    gap: clamp(32px, 6vw, 88px);
+    align-items: end;
+    padding-block: clamp(56px, 8vw, 104px) clamp(40px, 6vw, 72px);
+  }
+
+  .eyebrow {
+    margin: 0 0 18px;
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1.4;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+
+  .hero h1 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: clamp(44px, 6.4vw, 86px);
+    font-weight: 600;
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+  }
+
+  .hero h1 em {
+    font-style: normal;
+    color: var(--amber);
+  }
+
+  .lede {
+    max-width: 58ch;
+    margin: 26px 0 0;
+    font-size: 16px;
+    line-height: 1.85;
+    color: var(--text-2);
+  }
+
+  .hero-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 28px;
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 9px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1.4;
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+
+  .tag::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--amber);
+  }
+
+  .hero-path {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    border-top: 1px solid var(--line);
+    padding-top: 18px;
+  }
+
+  .path-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--text-3);
+  }
+
+  .path-head span:last-child {
+    color: var(--amber);
+  }
+
+  .path-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .path-list li {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: start;
+    padding-block: 14px;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .path-list li:first-child {
+    border-top: 0;
+  }
+
+  .path-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1.8;
+    color: var(--amber);
+  }
+
+  .path-list strong {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .path-list p {
+    margin: 2px 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-3);
+  }
+
+  .path-state {
+    margin-top: 2px;
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+
+  .preview-intro {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding-block: 8px 18px;
+  }
+
+  .preview-intro h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  .preview-intro span {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+  }
+
+  .preview-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px;
+    padding-bottom: clamp(64px, 8vw, 96px);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .frame-fig {
+    min-width: 0;
+    margin: 0;
+  }
+
+  .frame {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    box-shadow: var(--shadow-float);
+  }
+
+  .frame-bar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 32px;
+    padding-inline: 12px;
+    border-bottom: 1px solid var(--line);
+    background: #0d1014;
+  }
+
+  .frame-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #3b414c;
+  }
+
+  .frame-url {
+    margin-left: 6px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+  }
+
+  .frame-caption {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 10px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+  }
+
+  .frame-caption span:first-child {
+    color: var(--amber);
+  }
+
+  /* Landing specimen */
+  .pv-landing {
+    min-height: 362px;
+    padding: 13px 16px 16px;
+    background:
+      radial-gradient(420px 240px at 88% 0%, rgba(242, 179, 92, 0.06), transparent 65%),
+      var(--bg);
+  }
+
+  .pv-nav {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 7px;
+    color: var(--text-3);
+  }
+
+  .pv-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 8px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .pv-logo svg {
+    width: 13px;
+    height: 13px;
+    color: var(--amber);
+  }
+
+  .pv-links {
+    display: flex;
+    gap: 10px;
+    margin-left: 8px;
+  }
+
+  .pv-nav-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  .pv-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: var(--amber);
+    color: var(--amber-ink);
+    font-size: 7px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .pv-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    padding: 4px 8px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--text-2);
+    font-size: 7px;
+    line-height: 1.2;
+  }
+
+  .pv-hero {
+    display: grid;
+    grid-template-columns: 1.04fr 0.96fr;
+    gap: 18px;
+    align-items: center;
+    padding-top: 22px;
+  }
+
+  .pv-eyebrow {
+    font-family: var(--mono);
+    font-size: 6px;
+    letter-spacing: 0.12em;
+    color: var(--amber);
+  }
+
+  .pv-h1 {
+    margin-top: 7px;
+    font-family: var(--display);
+    font-size: clamp(20px, 2.35vw, 31px);
+    font-weight: 600;
+    line-height: 1.18;
+    letter-spacing: -0.03em;
+  }
+
+  .pv-sub {
+    margin-top: 8px;
+    font-size: 8px;
+    line-height: 1.7;
+    color: var(--text-3);
+  }
+
+  .pv-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .pv-reel {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 9px;
+    background:
+      radial-gradient(72px 48px at 64% 38%, rgba(242, 179, 92, 0.55), transparent 68%),
+      radial-gradient(100px 80px at 27% 80%, rgba(117, 216, 210, 0.19), transparent 65%),
+      linear-gradient(145deg, #0b1617 0%, #1b1510 54%, #090b0e 100%);
+  }
+
+  .pv-reel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, transparent 0 44%, rgba(117, 216, 210, 0.13) 45%, transparent 46% 100%),
+      linear-gradient(0deg, rgba(0, 0, 0, 0.62) 0 30%, transparent 62%),
+      repeating-linear-gradient(90deg, transparent 0 18px, rgba(255, 255, 255, 0.025) 19px, transparent 20px);
+    mix-blend-mode: screen;
+    opacity: 0.8;
+  }
+
+  .pv-reel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.09) 0.5px, transparent 0.6px);
+    background-size: 3px 3px;
+    opacity: 0.28;
+  }
+
+  .pv-play {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid rgba(242, 238, 230, 0.55);
+    border-radius: 50%;
+    background: rgba(11, 13, 16, 0.35);
+    transform: translate(-50%, -50%);
+  }
+
+  .pv-play::before {
+    content: "";
+    width: 0;
+    height: 0;
+    margin-left: 2px;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 6px solid var(--text);
+  }
+
+  .pv-reel-meta,
+  .pv-reel-time {
+    position: absolute;
+    z-index: 2;
+    font-family: var(--mono);
+    font-size: 6px;
+    letter-spacing: 0.08em;
+    color: rgba(242, 238, 230, 0.72);
+  }
+
+  .pv-reel-meta {
+    top: 7px;
+    left: 8px;
+  }
+
+  .pv-reel-time {
+    right: 8px;
+    bottom: 7px;
+  }
+
+  .pv-reel-prompt {
+    position: absolute;
+    right: 8px;
+    bottom: 7px;
+    left: 8px;
+    z-index: 2;
+    width: 74%;
+    padding: 5px 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    background: rgba(11, 13, 16, 0.76);
+    font-size: 6px;
+    line-height: 1.45;
+    color: var(--text-2);
+    backdrop-filter: blur(5px);
+  }
+
+  /* Create specimen */
+  .pv-create {
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr);
+    min-height: 362px;
+    background: var(--bg);
+  }
+
+  .pv-side {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    padding: 11px 8px;
+    border-right: 1px solid var(--line);
+    background: #0e1115;
+  }
+
+  .pv-side-brand {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 5px;
+    font-size: 7px;
+    font-weight: 600;
+  }
+
+  .pv-side-brand svg {
+    width: 12px;
+    height: 12px;
+    color: var(--amber);
+  }
+
+  .pv-new {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    border: 1px solid rgba(242, 179, 92, 0.32);
+    border-radius: 4px;
+    background: rgba(242, 179, 92, 0.08);
+    color: var(--amber);
+    font-size: 6px;
+  }
+
+  .pv-group {
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: 5.5px;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+  }
+
+  .pv-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 4px;
+    padding: 5px 5px;
+    border-radius: 4px;
+    font-size: 6px;
+    line-height: 1.4;
+    color: var(--text-3);
+  }
+
+  .pv-item.is-active {
+    background: var(--raised);
+    color: var(--text);
+  }
+
+  .pv-item time {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    font-size: 5px;
+    color: var(--text-3);
+  }
+
+  .pv-side-note {
+    margin-top: auto;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    font-size: 5.5px;
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .pv-side-note strong {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 6px;
+    color: var(--text-2);
+  }
+
+  .pv-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .pv-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    height: 30px;
+    padding-inline: 11px;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 6.5px;
+    color: var(--text-2);
+  }
+
+  .pv-top strong {
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .pv-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-family: var(--mono);
+    font-size: 5.5px;
+    color: var(--teal);
+  }
+
+  .pv-status::before {
+    content: "";
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--teal);
+  }
+
+  .pv-thread {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px 4px;
+  }
+
+  .pv-user-msg {
+    align-self: flex-end;
+    max-width: 78%;
+    padding: 6px 7px;
+    border-radius: 7px;
+    background: var(--raised);
+    font-size: 6.5px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  .pv-assistant {
+    display: grid;
+    grid-template-columns: 17px minmax(0, 1fr);
+    gap: 6px;
+    align-items: start;
+  }
+
+  .pv-avatar {
+    display: grid;
+    place-items: center;
+    width: 17px;
+    height: 17px;
+    border: 1px solid rgba(242, 179, 92, 0.28);
+    border-radius: 50%;
+    background: rgba(242, 179, 92, 0.09);
+    font-family: var(--mono);
+    font-size: 5px;
+    color: var(--amber);
+  }
+
+  .pv-assist-name {
+    margin-bottom: 2px;
+    font-family: var(--mono);
+    font-size: 5.5px;
+    color: var(--amber);
+  }
+
+  .pv-assist-text {
+    font-size: 6.5px;
+    line-height: 1.65;
+    color: var(--text-3);
+  }
+
+  .pv-storyboard {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    align-items: center;
+    margin-top: 5px;
+  }
+
+  .pv-chip {
+    padding: 2px 5px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 5.5px;
+    line-height: 1.4;
+    color: var(--text-3);
+  }
+
+  .pv-chip.is-accent {
+    border-color: var(--amber);
+    background: var(--amber);
+    color: var(--amber-ink);
+    font-weight: 600;
+  }
+
+  .pv-gen {
+    align-self: flex-start;
+    width: min(215px, 88%);
+    margin-left: 23px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--surface);
+  }
+
+  .pv-poster {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px;
+    aspect-ratio: 16 / 9;
+    padding: 7px;
+    background:
+      linear-gradient(0deg, rgba(0, 0, 0, 0.62), transparent 60%),
+      radial-gradient(52px 36px at 62% 40%, rgba(242, 179, 92, 0.55), transparent 68%),
+      radial-gradient(80px 55px at 28% 78%, rgba(117, 216, 210, 0.2), transparent 68%),
+      linear-gradient(140deg, #0c1718, #1b1410 58%, #090b0e);
+    font-size: 5.5px;
+    color: rgba(242, 238, 230, 0.82);
+  }
+
+  .pv-poster::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(90deg, transparent 0 15px, rgba(255, 255, 255, 0.03) 16px, transparent 17px);
+    opacity: 0.7;
+  }
+
+  .pv-progress {
+    height: 2px;
+    background: #2a2d33;
+  }
+
+  .pv-progress span {
+    display: block;
+    width: 68%;
+    height: 100%;
+    background: var(--amber);
+  }
+
+  .pv-gen-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 5px 7px;
+    font-family: var(--mono);
+    font-size: 5px;
+    color: var(--text-3);
+  }
+
+  .pv-composer {
+    margin: 0 11px 10px;
+    padding: 7px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--surface);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.26);
+  }
+
+  .pv-placeholder {
+    font-size: 6px;
+    color: var(--text-3);
+  }
+
+  .pv-composer-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .pv-chips {
+    display: flex;
+    gap: 3px;
+  }
+
+  /* Document layout */
+  .doc-layout {
+    display: grid;
+    grid-template-columns: var(--toc) minmax(0, 1fr);
+    gap: 56px;
+    align-items: start;
+  }
+
+  .toc {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding-top: 88px;
+    border-left: 1px solid var(--line);
+  }
+
+  .toc-label {
+    margin-bottom: 12px;
+    padding-left: 14px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.13em;
+    color: var(--text-3);
+  }
+
+  .toc a {
+    display: block;
+    padding: 7px 14px;
+    border-left: 1px solid transparent;
+    margin-left: -1px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-3);
+    transition: color 140ms ease, border-color 140ms ease;
+  }
+
+  .toc a:hover {
+    color: var(--text-2);
+  }
+
+  .toc a[aria-current="true"] {
+    border-left-color: var(--amber);
+    color: var(--text);
+  }
+
+  .sections {
+    min-width: 0;
+  }
+
+  .section {
+    padding-block: 88px;
+    border-top: 1px solid var(--line);
+    scroll-margin-top: 24px;
+  }
+
+  .section:first-child {
+    border-top: 0;
+  }
+
+  .section-head {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 20px;
+    margin-bottom: 42px;
+  }
+
+  .section-num {
+    padding-top: 7px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--amber);
+  }
+
+  .section-title h2 {
+    margin: 0;
+    font-family: var(--display);
+    font-size: clamp(30px, 3.4vw, 44px);
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+
+  .section-title p {
+    max-width: 64ch;
+    margin: 14px 0 0;
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--text-2);
+  }
+
+  .subhead {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 42px 0 16px;
+    font-family: var(--display);
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  .subhead:first-of-type {
+    margin-top: 0;
+  }
+
+  .subhead span {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    color: var(--amber);
+  }
+
+  .subhead + p {
+    margin-top: -6px;
+  }
+
+  .body-copy {
+    max-width: 68ch;
+    color: var(--text-2);
+    font-size: 14px;
+    line-height: 1.85;
+  }
+
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    min-width: 0;
+    padding: 22px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+
+  .card h3 {
+    margin: 0 0 8px;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  .card p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text-2);
+  }
+
+  .card .mono {
+    display: block;
+    margin-bottom: 12px;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    color: var(--amber);
+  }
+
+  .principle {
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+
+  .principle .mono {
+    margin-bottom: 10px;
+    color: var(--amber);
+  }
+
+  .principle h3 {
+    margin: 0 0 8px;
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .principle p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text-2);
+  }
+
+  .note {
+    margin-top: 22px;
+    padding: 14px 18px;
+    border-left: 2px solid var(--amber);
+    background: rgba(242, 179, 92, 0.045);
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text-2);
+  }
+
+  .note strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+
+  table {
+    width: 100%;
+    min-width: 580px;
+    border-collapse: collapse;
+    font-size: 13px;
+    text-align: left;
+  }
+
+  th {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--line);
+    background: #0e1115;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 13px 14px;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+    color: var(--text-2);
+    line-height: 1.65;
+  }
+
+  td:first-child {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  tr:last-child td {
+    border-bottom: 0;
+  }
+
+  td code,
+  th code {
+    white-space: nowrap;
+  }
+
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    margin-top: 22px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+
+  .flow-step {
+    position: relative;
+    min-width: 0;
+    padding: 20px 18px;
+    border-left: 1px solid var(--line);
+  }
+
+  .flow-step:first-child {
+    border-left: 0;
+  }
+
+  .flow-step .mono {
+    display: block;
+    margin-bottom: 12px;
+    font-size: 9px;
+    color: var(--amber);
+  }
+
+  .flow-step strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  .flow-step p {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--text-3);
+  }
+
+  .flow-step .path-state {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 2px 6px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 8px;
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .flow-step.is-gated .path-state {
+    border-color: rgba(242, 179, 92, 0.32);
+    color: var(--amber);
+  }
+
+  /* Anatomy */
+  .anatomy {
+    margin-top: 18px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+
+  .anatomy-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 42px;
+    margin-bottom: 10px;
+    padding-inline: 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #0e1115;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+  }
+
+  .anatomy-top span:last-child {
+    color: var(--text-2);
+  }
+
+  .anatomy-body {
+    display: grid;
+    grid-template-columns: 128px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .anatomy-side {
+    display: flex;
+    align-items: flex-end;
+    min-height: 280px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #0e1115;
+    font-family: var(--mono);
+    font-size: 8px;
+    line-height: 1.6;
+    color: var(--text-3);
+  }
+
+  .anatomy-main {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .anatomy-thread {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    min-height: 190px;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.015);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.05em;
+    color: var(--text-3);
+    text-align: center;
+    padding: 12px;
+  }
+
+  .anatomy-composer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 64px;
+    padding: 12px 14px;
+    border: 1px solid rgba(242, 179, 92, 0.28);
+    border-radius: 8px;
+    background: rgba(242, 179, 92, 0.04);
+    font-family: var(--mono);
+    font-size: 8px;
+    line-height: 1.6;
+    color: var(--text-3);
+  }
+
+  .anatomy-composer span:last-child {
+    color: var(--amber);
+    white-space: nowrap;
+  }
+
+  .dimension {
+    margin-top: 12px;
+    font-family: var(--mono);
+    font-size: 9px;
+    line-height: 1.8;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+  }
+
+  .dimension strong {
+    font-weight: 500;
+    color: var(--text-2);
+  }
+
+  /* Colors */
+  .swatch-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .swatch {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+
+  .swatch-color {
+    height: 84px;
+    background: var(--c);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .swatch-body {
+    padding: 11px 12px 12px;
+  }
+
+  .swatch-name {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .swatch-hex {
+    display: block;
+    margin-top: 2px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+  }
+
+  .swatch-use {
+    display: block;
+    margin-top: 7px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .palette-bar {
+    display: flex;
+    height: 22px;
+    margin-top: 16px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+
+  .palette-bar span {
+    display: block;
+    height: 100%;
+  }
+
+  .palette-note {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 9px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+  }
+
+  .palette-note span::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 5px;
+    border-radius: 50%;
+    background: var(--c);
+    vertical-align: 1px;
+  }
+
+  /* Type */
+  .type-specimen {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    gap: 28px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+
+  .ts-display {
+    margin: 0;
+    font-family: var(--display);
+    font-size: clamp(32px, 4.6vw, 58px);
+    font-weight: 600;
+    line-height: 1.18;
+    letter-spacing: -0.035em;
+  }
+
+  .ts-display span {
+    color: var(--amber);
+  }
+
+  .ts-body {
+    max-width: 40ch;
+    margin: 18px 0 0;
+    font-size: 14px;
+    line-height: 1.9;
+    color: var(--text-2);
+  }
+
+  .ts-meta {
+    padding-left: 22px;
+    border-left: 1px solid var(--line);
+  }
+
+  .ts-meta-row {
+    padding-block: 10px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .ts-meta-row:first-child {
+    padding-top: 0;
+  }
+
+  .ts-meta-row:last-child {
+    border-bottom: 0;
+  }
+
+  .ts-meta-row span {
+    display: block;
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.09em;
+    color: var(--amber);
+  }
+
+  .ts-meta-row strong {
+    display: block;
+    margin-top: 3px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .ts-meta-row p {
+    margin: 2px 0 0;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text-3);
+  }
+
+  .type-scale {
+    margin-top: 18px;
+    border-top: 1px solid var(--line);
+  }
+
+  .type-row {
+    display: grid;
+    grid-template-columns: 86px minmax(0, 1fr);
+    gap: 16px;
+    align-items: baseline;
+    padding-block: 10px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .type-row .mono {
+    font-size: 9px;
+    color: var(--text-3);
+  }
+
+  .type-row span:last-child {
+    color: var(--text-2);
+  }
+
+  /* Spacing / radius / shadow */
+  .space-scale {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+
+  .space-row {
+    display: grid;
+    grid-template-columns: 50px minmax(0, 1fr) 38px;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .space-row .mono {
+    font-size: 9px;
+    color: var(--text-3);
+    text-align: right;
+  }
+
+  .space-track {
+    display: flex;
+    align-items: center;
+    min-height: 10px;
+    border-left: 1px solid var(--line);
+  }
+
+  .space-bar {
+    width: var(--w);
+    max-width: 100%;
+    height: 8px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--amber), rgba(242, 179, 92, 0.55));
+  }
+
+  .space-row .value {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+  }
+
+  .radius-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+
+  .radius-item {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    align-items: flex-start;
+  }
+
+  .radius-box {
+    width: 62px;
+    height: 62px;
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    background: var(--raised);
+  }
+
+  .radius-item span {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+  }
+
+  .shadow-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    padding: 24px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #0e1115;
+  }
+
+  .shadow-box {
+    display: grid;
+    place-items: center;
+    min-height: 94px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+    text-align: center;
+    padding: 12px;
+  }
+
+  .shadow-box.is-float {
+    box-shadow: var(--shadow-float);
+  }
+
+  .shadow-box.is-modal {
+    box-shadow: var(--shadow-modal);
+  }
+
+  /* Components */
+  .specimen-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .specimen {
+    min-width: 0;
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #0e1115;
+  }
+
+  .specimen-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 14px;
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.09em;
+    color: var(--text-3);
+  }
+
+  .specimen-label span:last-child {
+    color: var(--amber);
+  }
+
+  .spec-composer {
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--surface);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  }
+
+  .spec-composer-text {
+    min-height: 52px;
+    font-size: 13px;
+    line-height: 1.75;
+    color: var(--text-2);
+  }
+
+  .spec-caret {
+    display: inline-block;
+    width: 1px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: -2px;
+    background: var(--amber);
+  }
+
+  .spec-composer-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .spec-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .spec-chip {
+    padding: 4px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 8px;
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .spec-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 7px 12px;
+    border-radius: 8px;
+    background: var(--amber);
+    color: var(--amber-ink);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .spec-cta.is-full {
+    display: flex;
+    width: 100%;
+  }
+
+  .spec-auth {
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--raised);
+    box-shadow: var(--shadow-modal);
+  }
+
+  .spec-auth-brand {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 14px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .spec-auth-brand svg {
+    width: 16px;
+    height: 16px;
+    color: var(--amber);
+  }
+
+  .spec-auth h4 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .spec-auth > p {
+    margin: 6px 0 0;
+    font-size: 11px;
+    line-height: 1.65;
+    color: var(--text-3);
+  }
+
+  .spec-draft {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 8px 9px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    font-size: 9px;
+    color: var(--text-3);
+  }
+
+  .spec-draft span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .spec-draft span:last-child {
+    flex: 0 0 auto;
+    padding: 2px 5px;
+    border: 1px solid rgba(242, 179, 92, 0.28);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 7px;
+    color: var(--amber);
+  }
+
+  .spec-tabs {
+    display: flex;
+    gap: 16px;
+    margin-top: 14px;
+    padding-bottom: 7px;
+    border-bottom: 1px solid var(--line);
+    font-size: 10px;
+    color: var(--text-3);
+  }
+
+  .spec-tabs span:first-child {
+    color: var(--text);
+    border-bottom: 1px solid var(--amber);
+    padding-bottom: 7px;
+    margin-bottom: -8px;
+  }
+
+  .spec-field {
+    margin-top: 9px;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    font-size: 9px;
+    color: var(--text-3);
+  }
+
+  .spec-auth .spec-cta {
+    margin-top: 12px;
+  }
+
+  .spec-gen {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    gap: 20px;
+    align-items: center;
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #0e1115;
+  }
+
+  .spec-gen-preview {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+
+  .spec-gen-poster {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 10px;
+    aspect-ratio: 16 / 9;
+    padding: 12px;
+    background:
+      linear-gradient(0deg, rgba(0, 0, 0, 0.66), transparent 62%),
+      radial-gradient(110px 72px at 64% 36%, rgba(242, 179, 92, 0.52), transparent 68%),
+      radial-gradient(140px 100px at 26% 80%, rgba(117, 216, 210, 0.2), transparent 68%),
+      linear-gradient(140deg, #0c1718, #1c1510 58%, #090b0e);
+    font-family: var(--mono);
+    font-size: 9px;
+    color: rgba(242, 238, 230, 0.85);
+  }
+
+  .spec-gen-poster::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(90deg, transparent 0 24px, rgba(255, 255, 255, 0.03) 25px, transparent 26px);
+    opacity: 0.8;
+  }
+
+  .spec-gen-progress {
+    height: 4px;
+    background: #2a2d33;
+  }
+
+  .spec-gen-progress span {
+    display: block;
+    width: 68%;
+    height: 100%;
+    background: var(--amber);
+  }
+
+  .spec-gen-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 12px;
+    font-family: var(--mono);
+    font-size: 8px;
+    color: var(--text-3);
+  }
+
+  .spec-gen-info h4 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .spec-gen-info p {
+    margin: 6px 0 0;
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--text-3);
+  }
+
+  .spec-state-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .state-pill {
+    padding: 3px 7px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 8px;
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .state-pill.is-amber {
+    border-color: rgba(242, 179, 92, 0.3);
+    color: var(--amber);
+  }
+
+  .state-pill.is-teal {
+    border-color: rgba(117, 216, 210, 0.28);
+    color: var(--teal);
+  }
+
+  .state-pill.is-success {
+    border-color: rgba(102, 209, 158, 0.3);
+    color: var(--success);
+  }
+
+  .state-pill.is-danger {
+    border-color: rgba(255, 116, 108, 0.3);
+    color: var(--danger);
+  }
+
+  .checklist {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px 24px;
+    margin: 18px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .checklist li {
+    position: relative;
+    padding-left: 20px;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+
+  .checklist li::before {
+    content: "";
+    position: absolute;
+    top: 7px;
+    left: 0;
+    width: 8px;
+    height: 8px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    background: var(--surface);
+  }
+
+  .checklist.is-checked li::before {
+    border-color: rgba(242, 179, 92, 0.5);
+    background: rgba(242, 179, 92, 0.12);
+  }
+
+  .list {
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .list li {
+    position: relative;
+    padding-left: 16px;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+
+  .list li::before {
+    content: "";
+    position: absolute;
+    top: 10px;
+    left: 0;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--amber);
+  }
+
+  .list.is-quiet li::before {
+    background: var(--text-3);
+  }
+
+  /* Code and prompts */
+  .code {
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 16px 0 0;
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #0a0c0f;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.85;
+    color: var(--text-2);
+    tab-size: 2;
+  }
+
+  .code.large {
+    font-size: 11px;
+  }
+
+  .prompt-card {
+    margin-top: 16px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #0a0c0f;
+  }
+
+  .prompt-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--line);
+    background: #0e1115;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+  }
+
+  .prompt-head span:last-child {
+    color: var(--amber);
+  }
+
+  .prompt-card pre {
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 0;
+    padding: 18px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.85;
+    color: var(--text-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .prompt-note {
+    margin-top: 9px;
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--text-3);
+  }
+
+  .step-list {
+    counter-reset: step;
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .step-list li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 12px;
+    padding-block: 12px;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+
+  .step-list li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: 9px;
+    line-height: 1.9;
+    color: var(--amber);
+  }
+
+  .footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    padding-block: 28px 48px;
+    border-top: 1px solid var(--line);
+  }
+
+  .footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .footer-brand svg {
+    width: 18px;
+    height: 18px;
+    color: var(--amber);
+  }
+
+  .footer-meta {
+    font-family: var(--mono);
+    font-size: 9px;
+    line-height: 1.8;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+    text-align: right;
+  }
+
+  .footer-meta strong {
+    font-weight: 500;
+    color: var(--amber);
+  }
+
+  @media (max-width: 1120px) {
+    .topnav {
+      gap: 14px;
+    }
+
+    .swatch-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 980px) {
+    .hero {
+      grid-template-columns: minmax(0, 1fr);
+      align-items: start;
+      padding-bottom: 48px;
+    }
+
+    .hero-path {
+      max-width: 620px;
+    }
+
+    .preview-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .doc-layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0;
+    }
+
+    .toc {
+      position: static;
+      flex-direction: row;
+      gap: 4px;
+      padding-top: 0;
+      padding-bottom: 12px;
+      overflow-x: auto;
+      border-left: 0;
+      border-bottom: 1px solid var(--line);
+      scrollbar-width: thin;
+    }
+
+    .toc-label {
+      display: none;
+    }
+
+    .toc a {
+      flex: 0 0 auto;
+      padding: 5px 9px;
+      border-left: 0;
+      border-bottom: 1px solid transparent;
+      margin-left: 0;
+      white-space: nowrap;
+    }
+
+    .toc a[aria-current="true"] {
+      border-left-color: transparent;
+      border-bottom-color: var(--amber);
+    }
+
+    .section {
+      padding-block: 64px;
+    }
+
+    .section-head {
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    .grid-3 {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .flow {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .flow-step:nth-child(3) {
+      border-left: 0;
+    }
+
+    .flow-step:nth-child(n + 3) {
+      border-top: 1px solid var(--line);
+    }
+
+    .specimen-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .spec-gen {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .type-specimen {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ts-meta {
+      padding-left: 0;
+      padding-top: 16px;
+      border-left: 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .topnav {
+      display: none;
+    }
+
+    .top-meta {
+      margin-left: auto;
+    }
+  }
+
+  @media (max-width: 700px) {
+    .topbar {
+      gap: 16px;
+      padding-block: 18px;
+    }
+
+    .top-meta {
+      border-left: 0;
+      padding-left: 0;
+      font-size: 9px;
+    }
+
+    .top-meta span:first-child {
+      display: none;
+    }
+
+    .hero {
+      padding-block: 44px 36px;
+    }
+
+    .hero h1 {
+      font-size: clamp(40px, 12vw, 58px);
+    }
+
+    .lede {
+      margin-top: 20px;
+      font-size: 14px;
+    }
+
+    .hero-tags {
+      margin-top: 20px;
+    }
+
+    .preview-intro {
+      padding-bottom: 12px;
+    }
+
+    .preview-intro h2 {
+      font-size: 19px;
+    }
+
+    .preview-grid {
+      gap: 26px;
+      padding-bottom: 56px;
+    }
+
+    .frame {
+      border-radius: 14px;
+    }
+
+    .pv-landing {
+      min-height: 0;
+      padding: 11px 12px 12px;
+    }
+
+    .pv-nav {
+      gap: 7px;
+    }
+
+    .pv-links {
+      display: none;
+    }
+
+    .pv-hero {
+      grid-template-columns: minmax(0, 1fr);
+      padding-top: 18px;
+    }
+
+    .pv-h1 {
+      font-size: 25px;
+    }
+
+    .pv-reel {
+      margin-top: 14px;
+    }
+
+    .pv-create {
+      grid-template-columns: minmax(0, 1fr);
+      min-height: 0;
+    }
+
+    .pv-side {
+      display: none;
+    }
+
+    .pv-gen {
+      margin-left: 0;
+      width: min(240px, 94%);
+    }
+
+    .pv-composer {
+      margin: 6px 10px 10px;
+    }
+
+    .section {
+      padding-block: 48px;
+    }
+
+    .section-head {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+      margin-bottom: 28px;
+    }
+
+    .section-num {
+      padding-top: 0;
+    }
+
+    .section-title h2 {
+      font-size: clamp(28px, 9vw, 38px);
+    }
+
+    .grid-2 {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .flow {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .flow-step,
+    .flow-step:nth-child(3) {
+      border-left: 0;
+    }
+
+    .flow-step:nth-child(n + 2) {
+      border-top: 1px solid var(--line);
+    }
+
+    .anatomy {
+      padding: 10px;
+    }
+
+    .anatomy-body {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .anatomy-side {
+      min-height: 72px;
+      align-items: center;
+    }
+
+    .swatch-grid {
+      gap: 8px;
+    }
+
+    .swatch-color {
+      height: 64px;
+    }
+
+    .shadow-grid {
+      grid-template-columns: minmax(0, 1fr);
+      padding: 16px;
+    }
+
+    .space-scale,
+    .radius-grid {
+      padding: 14px;
+    }
+
+    .checklist {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .footer {
+      align-items: flex-start;
+    }
+
+    .footer-meta {
+      text-align: left;
+    }
+
+    .spec-gen {
+      padding: 14px;
+    }
+  }
+
+  @media (max-width: 430px) {
+    body {
+      font-size: 14px;
+    }
+
+    .brand-name {
+      font-size: 13px;
+    }
+
+    .tag {
+      font-size: 9px;
+    }
+
+    .section-title h2 {
+      font-size: 30px;
+    }
+
+    .card {
+      padding: 18px;
+    }
+
+    .spec-auth {
+      padding: 14px;
+    }
+
+    .type-specimen {
+      padding: 18px;
+    }
+
+    .ts-display {
+      font-size: 34px;
+    }
+
+    .space-row {
+      grid-template-columns: 40px minmax(0, 1fr) 32px;
+      gap: 7px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+</style>
+
+<div class="page" id="top">
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="回到顶部">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 28 28" fill="none">
+          <path d="M4 10V4h6M18 4h6v6M24 18v6h-6M10 24H4v-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <circle cx="14" cy="14" r="2.4" fill="currentColor"/>
+        </svg>
+      </span>
+      <span class="brand-name">AI Video Studio</span>
+    </a>
+    <nav class="topnav" aria-label="文档导航">
+      <a href="#strategy">策略</a>
+      <a href="#pages">页面</a>
+      <a href="#visual">视觉</a>
+      <a href="#components">组件</a>
+      <a href="#figma">Figma</a>
+      <a href="#mapping">落地</a>
+    </nav>
+    <div class="top-meta">
+      <span>DESIGN SPEC</span>
+      <strong>v1.0 / 2026.10</strong>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div>
+        <p class="eyebrow">Product design spec / Nocturne</p>
+        <h1 id="hero-title">先让画面发生，<br><em>再让用户登录。</em></h1>
+        <p class="lede">
+          AI Video Studio 把入口拆成两层：门户负责说明与说服，<code>/create</code> 负责创作。
+          用户写下第一句提示词，只有点击生成时才遇见登录。登录不丢草稿，成功后自动继续。
+        </p>
+        <div class="hero-tags" aria-label="设计关键词">
+          <span class="tag">混合式入口</span>
+          <span class="tag">暗色影像工作室</span>
+          <span class="tag">登录即继续</span>
+          <span class="tag">PC 优先 / 移动自适应</span>
+        </div>
+      </div>
+      <aside class="hero-path" aria-label="关键路径">
+        <div class="path-head">
+          <span>关键路径</span>
+          <span>4 STEPS</span>
+        </div>
+        <ol class="path-list">
+          <li>
+            <span class="path-num">01</span>
+            <div><strong>门户 /</strong><p>先看作品，理解能做出什么。</p></div>
+            <span class="path-state">PUBLIC</span>
+          </li>
+          <li>
+            <span class="path-num">02</span>
+            <div><strong>工作台 /create</strong><p>写下提示词，调整风格与时长。</p></div>
+            <span class="path-state">PUBLIC</span>
+          </li>
+          <li>
+            <span class="path-num">03</span>
+            <div><strong>生成 / 登录</strong><p>只在生成前出现一次，草稿保留。</p></div>
+            <span class="path-state">GATED</span>
+          </li>
+          <li>
+            <span class="path-num">04</span>
+            <div><strong>完成 / 保存</strong><p>自动继续，结果进入作品与会话。</p></div>
+            <span class="path-state">AUTO</span>
+          </li>
+        </ol>
+      </aside>
+    </section>
+
+    <section aria-labelledby="preview-title">
+      <div class="preview-intro">
+        <h2 id="preview-title">两张关键界面</h2>
+        <span>LANDING / CREATE · DESKTOP 1440</span>
+      </div>
+      <div class="preview-grid">
+        <figure class="frame-fig">
+          <div class="frame">
+            <div class="frame-bar">
+              <span class="frame-dot"></span><span class="frame-dot"></span><span class="frame-dot"></span>
+              <span class="frame-url">ai-video.studio</span>
+            </div>
+            <div class="pv-landing" aria-hidden="true">
+              <div class="pv-nav">
+                <span class="pv-logo">
+                  <svg viewBox="0 0 28 28" fill="none">
+                    <path d="M4 10V4h6M18 4h6v6M24 18v6h-6M10 24H4v-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                    <circle cx="14" cy="14" r="2.4" fill="currentColor"/>
+                  </svg>
+                  AI Video Studio
+                </span>
+                <span class="pv-links"><span>作品</span><span>能力</span><span>工作流</span></span>
+                <span class="pv-nav-right">
+                  <span>登录</span>
+                  <span class="pv-btn">立即开始创作</span>
+                </span>
+              </div>
+              <div class="pv-hero">
+                <div>
+                  <div class="pv-eyebrow">AI VIDEO STUDIO / 01</div>
+                  <div class="pv-h1">把一句话，<br>变成一支片。</div>
+                  <div class="pv-sub">描述画面、节奏与情绪。<br>AI 帮你整理分镜、生成视频。</div>
+                  <div class="pv-actions">
+                    <span class="pv-btn">立即开始创作</span>
+                    <span class="pv-ghost">看 30 秒示例</span>
+                  </div>
+                </div>
+                <div class="pv-reel">
+                  <span class="pv-reel-meta">SHOWREEL / 2026</span>
+                  <span class="pv-play"></span>
+                  <span class="pv-reel-time">00:15</span>
+                  <span class="pv-reel-prompt">雨夜霓虹街头，慢推镜头，电影感</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <figcaption class="frame-caption"><span>01 / 门户</span><span>Hero + Showreel</span></figcaption>
+        </figure>
+
+        <figure class="frame-fig">
+          <div class="frame">
+            <div class="frame-bar">
+              <span class="frame-dot"></span><span class="frame-dot"></span><span class="frame-dot"></span>
+              <span class="frame-url">ai-video.studio/create</span>
+            </div>
+            <div class="pv-create" aria-hidden="true">
+              <aside class="pv-side">
+                <span class="pv-side-brand">
+                  <svg viewBox="0 0 28 28" fill="none">
+                    <path d="M4 10V4h6M18 4h6v6M24 18v6h-6M10 24H4v-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                    <circle cx="14" cy="14" r="2.4" fill="currentColor"/>
+                  </svg>
+                  Studio
+                </span>
+                <span class="pv-new">＋ 新建创作</span>
+                <span class="pv-group">今天</span>
+                <span class="pv-item is-active">雨夜霓虹街头<time>10:24</time></span>
+                <span class="pv-item">海边日落分镜<time>09:12</time></span>
+                <span class="pv-side-note"><strong>登录后保存创作</strong>会话、分镜和结果会出现在这里。</span>
+              </aside>
+              <div class="pv-main">
+                <div class="pv-top">
+                  <strong>雨夜霓虹街头</strong>
+                  <span class="pv-status">实时连接</span>
+                </div>
+                <div class="pv-thread">
+                  <div class="pv-user-msg">雨夜霓虹街头，慢推镜头，霓虹反射在积水里，电影感</div>
+                  <div class="pv-assistant">
+                    <span class="pv-avatar">AI</span>
+                    <div>
+                      <div class="pv-assist-name">AI 导演</div>
+                      <div class="pv-assist-text">可以。我把画面拆成三个镜头：远景建立街道，中景跟随人物，特写落在积水里的霓虹。</div>
+                      <div class="pv-storyboard">
+                        <span class="pv-chip">电影感</span>
+                        <span class="pv-chip">16:9</span>
+                        <span class="pv-chip">5s</span>
+                        <span class="pv-chip is-accent">生成视频</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="pv-gen">
+                    <div class="pv-poster"><span>正在生成画面</span><span>68%</span></div>
+                    <div class="pv-progress"><span></span></div>
+                    <div class="pv-gen-meta"><span>生成中</span><span>离开页面不会中断</span></div>
+                  </div>
+                </div>
+                <div class="pv-composer">
+                  <div class="pv-placeholder">描述你想拍的画面…</div>
+                  <div class="pv-composer-foot">
+                    <div class="pv-chips"><span class="pv-chip">电影感</span><span class="pv-chip">16:9</span><span class="pv-chip">5s</span></div>
+                    <span class="pv-btn">生成视频</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <figcaption class="frame-caption"><span>02 / 工作台</span><span>Create + Generation</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <div class="doc-layout">
+      <aside class="toc" aria-label="目录">
+        <div class="toc-label">CONTENTS</div>
+        <a href="#strategy">01 策略与流程</a>
+        <a href="#pages">02 页面结构</a>
+        <a href="#visual">03 视觉系统</a>
+        <a href="#components">04 组件与状态</a>
+        <a href="#copy">05 文案与动效</a>
+        <a href="#figma">06 Figma 交付</a>
+        <a href="#mapping">07 代码映射</a>
+      </aside>
+
+      <div class="sections">
+        <section class="section" id="strategy" aria-labelledby="strategy-title">
+          <div class="section-head">
+            <div class="section-num">01 / STRATEGY</div>
+            <div class="section-title">
+              <h2 id="strategy-title">登录是生成前的门槛，不是进入产品的门槛。</h2>
+              <p>
+                门户承担第一次访问的信任与理解，工作台承担实际创作。两者之间用「立即开始创作」连接，
+                而不是把用户先送去注册。游客可以输入、选参数、看示例，只有生成动作触发登录。
+              </p>
+            </div>
+          </div>
+
+          <div class="grid-3">
+            <article class="principle">
+              <span class="mono">PRINCIPLE 01</span>
+              <h3>先创作，后登录</h3>
+              <p>输入框从一开始就可用。登录 Modal 覆盖在当前页，草稿和参数保持原值，成功后自动继续。</p>
+            </article>
+            <article class="principle">
+              <span class="mono">PRINCIPLE 02</span>
+              <h3>作品先行</h3>
+              <p>门户首屏先给一支片，而不是功能列表。案例、封面和提示词比「AI 能力」四个字更有说服力。</p>
+            </article>
+            <article class="principle">
+              <span class="mono">PRINCIPLE 03</span>
+              <h3>一个主界面</h3>
+              <p>对话页就是产品首页。会话、分镜、生成进度和结果都在同一条创作流里，不把用户带进后台表格。</p>
+            </article>
+          </div>
+
+          <h3 class="subhead"><span>ROUTES</span> 路由与访问</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>路径</th><th>访问</th><th>页面</th><th>说明</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>/</code></td><td>公开</td><td>Landing 门户</td><td>已登录访问时重定向到 <code>/create</code></td></tr>
+                <tr><td><code>/create</code></td><td>公开</td><td>对话工作台</td><td>游客可输入；生成时打开登录 Modal</td></tr>
+                <tr><td><code>/works</code></td><td>登录</td><td>我的作品</td><td>游客访问回到 <code>/create</code> 并打开登录</td></tr>
+                <tr><td><code>/login</code> <code>/register</code></td><td>公开</td><td>兜底页面</td><td>保留直接链接；常规流程使用 Modal</td></tr>
+                <tr><td><code>/chat</code> <code>/project</code></td><td>兼容</td><td>重定向</td><td>分别到 <code>/create</code> 与 <code>/works</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="subhead"><span>FLOW</span> 从门户到成片</h3>
+          <div class="flow" aria-label="主流程">
+            <div class="flow-step">
+              <span class="mono">01</span>
+              <strong>门户</strong>
+              <p>看作品、看案例、理解产品。</p>
+              <span class="path-state">PUBLIC</span>
+            </div>
+            <div class="flow-step">
+              <span class="mono">02</span>
+              <strong>工作台</strong>
+              <p>输入提示词，调整风格、比例、时长。</p>
+              <span class="path-state">PUBLIC</span>
+            </div>
+            <div class="flow-step is-gated">
+              <span class="mono">03</span>
+              <strong>生成 + 登录</strong>
+              <p>草稿保留，登录成功后自动继续。</p>
+              <span class="path-state">GATED</span>
+            </div>
+            <div class="flow-step">
+              <span class="mono">04</span>
+              <strong>完成 + 保存</strong>
+              <p>进度、结果、会话与作品进入账号。</p>
+              <span class="path-state">AUTO</span>
+            </div>
+          </div>
+
+          <div class="note">
+            <strong>游客边界：</strong>游客不创建后端会话、不建立 WebSocket、不请求历史；草稿只存在本地。
+            登录成功后创建会话并继续。这样既避免匿名数据，也让「登录后继续」有明确含义。
+          </div>
+        </section>
+
+        <section class="section" id="pages" aria-labelledby="pages-title">
+          <div class="section-head">
+            <div class="section-num">02 / PAGES</div>
+            <div class="section-title">
+              <h2 id="pages-title">门户负责说服，工作台负责创作。</h2>
+              <p>
+                页面数量保持克制。P0 只有门户、工作台、作品、登录 Modal 和兜底登录页。
+                每个页面都要有明确的空状态、加载状态和失败状态。
+              </p>
+            </div>
+          </div>
+
+          <h3 class="subhead"><span>CREATE</span> 工作台布局解剖</h3>
+          <div class="anatomy" aria-label="工作台布局示意">
+            <div class="anatomy-top"><span>WORKSPACE TOP BAR</span><span>64 px</span></div>
+            <div class="anatomy-body">
+              <div class="anatomy-side">SIDEBAR<br>280 px<br><br>品牌 / 新建<br>会话历史<br>用户或登录</div>
+              <div class="anatomy-main">
+                <div class="anatomy-thread">CONVERSATION<br>MAX WIDTH 760 px<br>用户消息 / AI 导演 / 分镜卡 / 生成卡</div>
+                <div class="anatomy-composer"><span>PROMPT COMPOSER<br>MAX WIDTH 880 px</span><span>生成视频 →</span></div>
+              </div>
+            </div>
+          </div>
+          <p class="dimension">
+            <strong>桌面：</strong>侧栏 280 固定；顶栏 64；对话内容 760 居中；输入区 880 居中。
+            <strong>移动：</strong>侧栏变 300 抽屉；输入区固定底部并处理安全区；生成卡宽度 100%。
+          </p>
+
+          <div class="grid-2" style="margin-top: 28px;">
+            <article class="card">
+              <span class="mono">LANDING /</span>
+              <h3>门户首屏</h3>
+              <p>72px 导航；左侧主张与 CTA，右侧 16:9 Showreel。首屏之后依次是三步流程、3×2 案例、能力说明、结尾 CTA。移动端单列，案例横向滚动。</p>
+              <ul class="list">
+                <li>标题：`把一句话，变成一支片。`</li>
+                <li>主 CTA：`立即开始创作`</li>
+                <li>副 CTA：`看 30 秒示例`</li>
+                <li>示例标注，不伪装成真实客户作品。</li>
+              </ul>
+            </article>
+            <article class="card">
+              <span class="mono">CREATE / EMPTY</span>
+              <h3>第一屏就让人想输入</h3>
+              <p>内容区距顶部约 14vh，标题 `今天想拍什么？`，输入区 880px，4 个示例提示词，参数行和 `生成视频` 主按钮。不显示空白画布。</p>
+              <ul class="list">
+                <li>Enter 生成，Shift + Enter 换行。</li>
+                <li>游客态不显示禁用按钮，点击打开登录。</li>
+                <li>左侧栏用登录说明卡替代历史。</li>
+              </ul>
+            </article>
+          </div>
+
+          <h3 class="subhead"><span>AUTH</span> 登录 Modal</h3>
+          <div class="grid-2">
+            <div>
+              <p class="body-copy">
+                桌面 440px，圆角 20px，内边距 32px。标题是 `登录后继续生成`，正文说明提示词和参数已经保留，
+                下方给出一行草稿摘要。登录/注册用文字式分段切换，不用厚重 Tab。
+              </p>
+              <ul class="list">
+                <li>字段：账号、密码；注册：用户名、邮箱、密码。</li>
+                <li>主按钮：`登录并继续` / `注册并继续`。</li>
+                <li>错误在表单内说明；不用 Toast 作为唯一反馈。</li>
+                <li>提交中锁定表单，仍允许关闭；关闭后草稿不变。</li>
+                <li>移动端改为底部抽屉，最大高度 88vh。</li>
+              </ul>
+              <div class="note">
+                <strong>不做假入口：</strong>后端没有忘记密码、社交登录、额度体系，设计稿也不展示这些控件。
+              </div>
+            </div>
+            <div class="specimen">
+              <div class="specimen-label"><span>AUTH MODAL / GATED</span><span>SPECIMEN</span></div>
+              <div class="spec-auth">
+                <div class="spec-auth-brand">
+                  <svg viewBox="0 0 28 28" fill="none">
+                    <path d="M4 10V4h6M18 4h6v6M24 18v6h-6M10 24H4v-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                    <circle cx="14" cy="14" r="2.4" fill="currentColor"/>
+                  </svg>
+                  AI Video Studio
+                </div>
+                <h4>登录后继续生成</h4>
+                <p>提示词和参数已经保留。登录或注册后会自动继续。</p>
+                <div class="spec-draft"><span>雨夜霓虹街头，慢推镜头…</span><span>已保留</span></div>
+                <div class="spec-tabs"><span>登录</span><span>注册</span></div>
+                <div class="spec-field">账号</div>
+                <div class="spec-field">密码</div>
+                <span class="spec-cta is-full">登录并继续</span>
+              </div>
+            </div>
+          </div>
+
+          <h3 class="subhead"><span>WORKS</span> 我的作品与移动端</h3>
+          <div class="grid-2">
+            <article class="card">
+              <span class="mono">WORKS /</span>
+              <h3>作品是结果，不是任务表</h3>
+              <p>3 列网格，16:9 封面优先。筛选 `全部 / 生成中 / 已完成 / 失败`。卡片显示状态、提示词前两行、参数和更新时间。生成中显示真实进度，不显示假百分比。</p>
+            </article>
+            <article class="card">
+              <span class="mono">MOBILE / 390</span>
+              <h3>底部输入，单手可达</h3>
+              <p>顶栏 56px；侧栏改抽屉；对话 16px 边距；输入区固定底部并加安全区；参数横向滚动；登录 Modal 变底部抽屉。</p>
+            </article>
+          </div>
+
+          <h3 class="subhead"><span>STATES</span> 必须设计的状态</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>场景</th><th>界面表现</th><th>下一步</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>游客空</td><td>输入可用，侧栏登录说明卡，顶栏登录</td><td>输入或点示例</td></tr>
+                <tr><td>游客有草稿</td><td>草稿本地保存，主按钮「生成视频」</td><td>点击生成 → 登录</td></tr>
+                <tr><td>登录提交</td><td>字段只读，按钮 loading，草稿摘要可见</td><td>成功自动继续</td></tr>
+                <tr><td>登录失败</td><td>表单内错误，内容不丢</td><td>修改后重试</td></tr>
+                <tr><td>生成中</td><td>16:9 封面 + 真实进度 + 状态文案</td><td>可离开页面</td></tr>
+                <tr><td>完成</td><td>播放器 + 预览/下载/继续修改</td><td>保存到作品</td></tr>
+                <tr><td>失败</td><td>原因 + 重试 + 修改提示词</td><td>保留参数</td></tr>
+                <tr><td>离线</td><td>顶栏「离线兜底」，结果仍保存</td><td>自动重连</td></tr>
+                <tr><td>登录过期</td><td>保留草稿，打开登录 Modal</td><td>登录后继续原动作</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="visual" aria-labelledby="visual-title">
+          <div class="section-head">
+            <div class="section-num">03 / VISUAL</div>
+            <div class="section-title">
+              <h2 id="visual-title">像一间关灯后的剪辑室。</h2>
+              <p>
+                大面积碳黑、暖白文字、钨丝灯色的行动点，少量青色用于技术状态。视频是唯一的高饱和内容，
+                界面退后。衬线标题只出现在门户和品牌语境，工作台保持无衬线的效率。
+              </p>
+            </div>
+          </div>
+
+          <h3 class="subhead"><span>COLOR</span> 颜色 Token</h3>
+          <div class="swatch-grid">
+            <div class="swatch"><div class="swatch-color" style="--c:#0b0d10"></div><div class="swatch-body"><span class="swatch-name">color/bg</span><span class="swatch-hex">#0B0D10</span><span class="swatch-use">页面底色</span></div></div>
+            <div class="swatch"><div class="swatch-color" style="--c:#12151a"></div><div class="swatch-body"><span class="swatch-name">color/surface</span><span class="swatch-hex">#12151A</span><span class="swatch-use">侧栏、卡片、输入区</span></div></div>
+            <div class="swatch"><div class="swatch-color" style="--c:#191d24"></div><div class="swatch-body"><span class="swatch-name">color/raised</span><span class="swatch-hex">#191D24</span><span class="swatch-use">激活项、浮层、Modal</span></div></div>
+            <div class="swatch"><div class="swatch-color" style="--c:#272c35"></div><div class="swatch-body"><span class="swatch-name">color/line</span><span class="swatch-hex">#272C35</span><span class="swatch-use">边框与分隔线</span></div></div>
+            <div class="swatch"><div class="swatch-color" style="--c:#f2eee6"></div><div class="swatch-body"><span class="swatch-name">color/text</span><span class="swatch-hex">#F2EEE6</span><span class="swatch-use">主要文字、暖白</span></div></div>
+            <div class="swatch"><div class="swatch-color" style="--c:#a7adb7"></div><div class="swatch-body"><span class="swatch-name">color/text-2</span><span class="swatch-hex">#A7ADB7</span><span class="swatch-use">次要文字</span></div></div>
+            <div class="swatch"><div class="swatch-color" style="--c:#f2b35c"></div><div class="swatch-body"><span class="swatch-name">color/accent</span><span class="swatch-hex">#F2B35C</span><span class="swatch-use">主按钮、焦点</span></div></div>
+            <div class="swatch"><div class="swatch-color" style="--c:#75d8d2"></div><div class="swatch-body"><span class="swatch-name">color/halide</span><span class="swatch-hex">#75D8D2</span><span class="swatch-use">连接、技术状态</span></div></div>
+          </div>
+          <div class="palette-bar" aria-label="颜色使用比例">
+            <span style="width:56%; background:#0b0d10"></span>
+            <span style="width:14%; background:#12151a"></span>
+            <span style="width:12%; background:#191d24"></span>
+            <span style="width:10%; background:#a7adb7"></span>
+            <span style="width:6%; background:#f2b35c"></span>
+            <span style="width:2%; background:#75d8d2"></span>
+          </div>
+          <div class="palette-note">
+            <span style="--c:#0b0d10; color:#8a919c">碳黑 56%</span>
+            <span style="--c:#12151a; color:#8a919c">表面 14%</span>
+            <span style="--c:#191d24; color:#8a919c">浮层 12%</span>
+            <span style="--c:#a7adb7; color:#8a919c">文字 10%</span>
+            <span style="--c:#f2b35c; color:#f2b35c">暖色 6%</span>
+            <span style="--c:#75d8d2; color:#75d8d2">青色 2%</span>
+          </div>
+
+          <h3 class="subhead"><span>TYPE</span> 字体系统</h3>
+          <div class="type-specimen">
+            <div>
+              <p class="ts-display">把一句话，<br><span>变成一支片。</span></p>
+              <p class="ts-body">正文使用 Noto Sans SC，15/24，保持 65 字符左右的阅读宽度。工作台不使用衬线，效率优先；门户标题使用 Noto Serif SC，建立电影片头的气质。</p>
+            </div>
+            <div class="ts-meta">
+              <div class="ts-meta-row"><span>DISPLAY</span><strong>Noto Serif SC 600</strong><p>64/68 · 门户 Hero</p></div>
+              <div class="ts-meta-row"><span>BODY</span><strong>Noto Sans SC 400</strong><p>15/24 · 正文与消息</p></div>
+              <div class="ts-meta-row"><span>LABEL</span><strong>Noto Sans SC 500</strong><p>13/20 · 表单与按钮</p></div>
+              <div class="ts-meta-row"><span>MONO</span><strong>IBM Plex Mono 400</strong><p>11/16 · 眉题与参数</p></div>
+            </div>
+          </div>
+          <div class="type-scale">
+            <div class="type-row"><span class="mono">H1 / 40</span><span style="font-size:24px; font-weight:600; color:#f2eee6">今天想拍什么？</span></div>
+            <div class="type-row"><span class="mono">H2 / 28</span><span style="font-size:19px; font-weight:600; color:#f2eee6">一段描述，拆成三个镜头</span></div>
+            <div class="type-row"><span class="mono">BODY / 15</span><span>写下一个画面，AI 会帮你整理镜头、节奏和生成参数。</span></div>
+            <div class="type-row"><span class="mono">CAPTION / 12</span><span style="font-size:12px; color:#8a919c">更新时间 10:24 · 电影感 · 16:9 · 5s</span></div>
+            <div class="type-row"><span class="mono">MONO / 11</span><span class="mono" style="font-size:11px; color:#a7adb7">REQUEST 68% / 00:15 / 1080P</span></div>
+          </div>
+
+          <h3 class="subhead"><span>SPACE</span> 间距、圆角与阴影</h3>
+          <div class="grid-2">
+            <div class="space-scale" aria-label="间距尺度">
+              <div class="space-row"><span class="mono">space/1</span><div class="space-track"><span class="space-bar" style="--w:4px"></span></div><span class="value">4</span></div>
+              <div class="space-row"><span class="mono">space/2</span><div class="space-track"><span class="space-bar" style="--w:8px"></span></div><span class="value">8</span></div>
+              <div class="space-row"><span class="mono">space/3</span><div class="space-track"><span class="space-bar" style="--w:12px"></span></div><span class="value">12</span></div>
+              <div class="space-row"><span class="mono">space/4</span><div class="space-track"><span class="space-bar" style="--w:16px"></span></div><span class="value">16</span></div>
+              <div class="space-row"><span class="mono">space/5</span><div class="space-track"><span class="space-bar" style="--w:20px"></span></div><span class="value">20</span></div>
+              <div class="space-row"><span class="mono">space/6</span><div class="space-track"><span class="space-bar" style="--w:24px"></span></div><span class="value">24</span></div>
+              <div class="space-row"><span class="mono">space/8</span><div class="space-track"><span class="space-bar" style="--w:32px"></span></div><span class="value">32</span></div>
+              <div class="space-row"><span class="mono">space/10</span><div class="space-track"><span class="space-bar" style="--w:40px"></span></div><span class="value">40</span></div>
+              <div class="space-row"><span class="mono">space/12</span><div class="space-track"><span class="space-bar" style="--w:48px"></span></div><span class="value">48</span></div>
+              <div class="space-row"><span class="mono">space/16</span><div class="space-track"><span class="space-bar" style="--w:64px"></span></div><span class="value">64</span></div>
+              <div class="space-row"><span class="mono">space/24</span><div class="space-track"><span class="space-bar" style="--w:96px"></span></div><span class="value">96</span></div>
+            </div>
+            <div>
+              <div class="radius-grid" aria-label="圆角尺度">
+                <div class="radius-item"><div class="radius-box" style="--r:6px"></div><span>6 / tag</span></div>
+                <div class="radius-item"><div class="radius-box" style="--r:10px"></div><span>10 / control</span></div>
+                <div class="radius-item"><div class="radius-box" style="--r:14px"></div><span>14 / card</span></div>
+                <div class="radius-item"><div class="radius-box" style="--r:20px"></div><span>20 / panel</span></div>
+                <div class="radius-item"><div class="radius-box" style="--r:999px; width:62px"></div><span>pill</span></div>
+              </div>
+              <div class="shadow-grid" style="margin-top: 18px">
+                <div class="shadow-box is-float">shadow / float<br>输入区与浮层</div>
+                <div class="shadow-box is-modal">shadow / modal<br>登录 Modal</div>
+              </div>
+            </div>
+          </div>
+          <div class="note">
+            <strong>边框优先于阴影：</strong>普通卡片使用 1px 边框和表面色，不默认加阴影。
+            只有输入区、Modal 和浮层需要抬高。焦点环使用暖色双环，不能只依赖浏览器默认轮廓。
+          </div>
+        </section>
+
+        <section class="section" id="components" aria-labelledby="components-title">
+          <div class="section-head">
+            <div class="section-num">04 / COMPONENTS</div>
+            <div class="section-title">
+              <h2 id="components-title">三个组件决定这条流程成不成立。</h2>
+              <p>
+                PromptComposer 承载第一次创作，AuthModal 承载登录不中断，GenerationCard 承载等待与结果。
+                先把这三个组件的状态做全，再扩页面。
+              </p>
+            </div>
+          </div>
+
+          <div class="specimen-grid">
+            <div class="specimen">
+              <div class="specimen-label"><span>PROMPT COMPOSER / GUEST</span><span>SPECIMEN</span></div>
+              <div class="spec-composer">
+                <div class="spec-composer-text">雨夜霓虹街头，慢推镜头，霓虹反射在积水里，电影感<span class="spec-caret"></span></div>
+                <div class="spec-composer-foot">
+                  <div class="spec-chips"><span class="spec-chip">电影感</span><span class="spec-chip">16:9</span><span class="spec-chip">5s</span></div>
+                  <span class="spec-cta">生成视频</span>
+                </div>
+              </div>
+              <ul class="list" style="margin-top: 14px">
+                <li>游客态按钮可点，点击打开登录，不做禁用。</li>
+                <li>参数未接入前不假装生效；P0 先做提示词与默认值。</li>
+                <li>错误显示在容器下方，不替换用户内容。</li>
+              </ul>
+            </div>
+
+            <div class="specimen">
+              <div class="specimen-label"><span>GENERATION CARD / 68%</span><span>SPECIMEN</span></div>
+              <div class="spec-gen-preview">
+                <div class="spec-gen-poster"><span>正在生成画面</span><span>68%</span></div>
+                <div class="spec-gen-progress"><span></span></div>
+                <div class="spec-gen-meta"><span>生成中</span><span>离开页面不会中断</span></div>
+              </div>
+              <div class="spec-gen-info" style="margin-top: 12px">
+                <h4>生成卡只展示真实进度</h4>
+                <p>排队、准备、生成、收尾、完成、失败、离线。状态文案跟随后端进度，不编造阶段。</p>
+              </div>
+              <div class="spec-state-row">
+                <span class="state-pill">排队</span>
+                <span class="state-pill is-amber">准备</span>
+                <span class="state-pill is-amber">生成</span>
+                <span class="state-pill is-amber">收尾</span>
+                <span class="state-pill is-success">完成</span>
+                <span class="state-pill is-danger">失败</span>
+                <span class="state-pill is-teal">离线</span>
+              </div>
+            </div>
+          </div>
+
+          <h3 class="subhead"><span>INVENTORY</span> 组件清单</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>组件</th><th>优先级</th><th>状态 / 变体</th><th>说明</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>BrandMark</td><td>P0</td><td>默认 / 小号</td><td>取景框标志，避免通用播放三角</td></tr>
+                <tr><td>LandingHeader</td><td>P0</td><td>游客 / 已登录</td><td>门户顶栏，登录走 Modal</td></tr>
+                <tr><td>Hero + Showreel</td><td>P0</td><td>桌面 / 移动 / 播放</td><td>首屏主张与 16:9 作品框</td></tr>
+                <tr><td>ExampleGallery</td><td>P0</td><td>默认 / 空</td><td>3 列 16:9 案例，标注示例</td></tr>
+                <tr><td>PromptComposer</td><td>P0</td><td>空 / 有内容 / 生成中 / 错误 / 游客</td><td>提示词、参数与生成按钮</td></tr>
+                <tr><td>AuthModal</td><td>P0</td><td>登录 / 注册 / 提交 / 错误 / 成功</td><td>同页登录闸门，展示草稿摘要</td></tr>
+                <tr><td>WorkspaceSidebar</td><td>P0</td><td>游客 / 登录 / 加载 / 空</td><td>历史会话与用户区</td></tr>
+                <tr><td>MessageBubble</td><td>P0</td><td>用户 / 助手 / 流式</td><td>用户右对齐；助手正文不加厚气泡</td></tr>
+                <tr><td>StoryboardCard</td><td>P0</td><td>默认 / 生成中</td><td>镜头摘要与生成入口</td></tr>
+                <tr><td>GenerationCard</td><td>P0</td><td>7 种状态</td><td>封面、进度、操作、失败原因</td></tr>
+                <tr><td>WorkCard</td><td>P0</td><td>生成中 / 完成 / 失败</td><td>作品网格，不展示任务 ID 主视觉</td></tr>
+                <tr><td>SocketBadge</td><td>P0</td><td>在线 / 离线</td><td>文字 + 图标，不只用颜色</td></tr>
+                <tr><td>EmptyState</td><td>P0</td><td>通用</td><td>标题、说明、主操作</td></tr>
+                <tr><td>MobileDrawer</td><td>P0</td><td>关闭 / 打开</td><td>移动端侧栏</td></tr>
+                <tr><td>CreditsBadge</td><td>不做</td><td>—</td><td>后端无额度能力，不展示</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="subhead"><span>STATES</span> 组件状态矩阵</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>场景</th><th>输入区</th><th>主按钮</th><th>侧栏</th><th>反馈</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>游客空</td><td>可用</td><td>生成视频</td><td>登录说明卡</td><td>示例提示词</td></tr>
+                <tr><td>游客有草稿</td><td>可用</td><td>生成视频</td><td>登录说明卡</td><td>草稿本地保存</td></tr>
+                <tr><td>登录 Modal</td><td>背景锁定</td><td>—</td><td>背景压暗</td><td>草稿摘要</td></tr>
+                <tr><td>生成中</td><td>可输入新内容（P1）</td><td>禁用重复提交</td><td>会话更新</td><td>真实进度</td></tr>
+                <tr><td>完成</td><td>可用</td><td>生成视频</td><td>会话更新</td><td>播放 / 下载</td></tr>
+                <tr><td>失败</td><td>可用</td><td>重试</td><td>会话保留</td><td>原因 + 重试</td></tr>
+                <tr><td>离线</td><td>可用</td><td>可用</td><td>保留</td><td>结果仍保存</td></tr>
+                <tr><td>登录过期</td><td>保留草稿</td><td>触发登录</td><td>保留</td><td>登录 Modal</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="copy" aria-labelledby="copy-title">
+          <div class="section-head">
+            <div class="section-num">05 / COPY &amp; MOTION</div>
+            <div class="section-title">
+              <h2 id="copy-title">按钮说明结果，错误说明下一步。</h2>
+              <p>
+                语气直接、具体，像一位懂制作的同事。不用「一键」「魔法」「赋能」，
+                不用感叹号堆情绪，也不用 emoji 代替图标。关键错误必须在表单或卡片内说明。
+              </p>
+            </div>
+          </div>
+
+          <h3 class="subhead"><span>COPY</span> 核心文案</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>位置</th><th>文案</th><th>备注</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>门户主标题</td><td>把一句话，变成一支片。</td><td>具体、有画面</td></tr>
+                <tr><td>门户副标题</td><td>描述画面、节奏与情绪。AI 帮你整理分镜、生成视频。先写下来，剩下的交给工作室。</td><td>不用抽象能力词</td></tr>
+                <tr><td>主 CTA</td><td>立即开始创作</td><td>说明结果，不用「提交」</td></tr>
+                <tr><td>工作台标题</td><td>今天想拍什么？</td><td>像同事开场</td></tr>
+                <tr><td>输入占位</td><td>描述你想拍的画面，例如：傍晚的海边，浪花慢镜头，暖色调，镜头缓慢推进…</td><td>直接给可模仿的例子</td></tr>
+                <tr><td>登录标题</td><td>登录后继续生成</td><td>说明登录之后发生什么</td></tr>
+                <tr><td>登录说明</td><td>提示词和参数已经保留。登录或注册后会自动继续。</td><td>降低丢失焦虑</td></tr>
+                <tr><td>失败说明</td><td>生成没有完成。你可以重试，提示词和参数还在。</td><td>不道歉，给下一步</td></tr>
+                <tr><td>离线</td><td>实时连接中断，结果仍会保存。</td><td>不制造恐慌</td></tr>
+                <tr><td>作品空状态</td><td>还没有作品。先写下第一个画面。</td><td>把空状态变成入口</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="subhead"><span>MOTION</span> 动效原则</h3>
+          <div class="grid-3">
+            <article class="card">
+              <span class="mono">120 MS</span>
+              <h3>微交互</h3>
+              <p>悬停、颜色、透明度。只改变一个属性，不做位移和弹跳。</p>
+            </article>
+            <article class="card">
+              <span class="mono">240 MS</span>
+              <h3>Modal</h3>
+              <p>背景淡入，面板从 0.98 到 1。移动端从底部上滑，尊重减少动效设置。</p>
+            </article>
+            <article class="card">
+              <span class="mono">480 MS</span>
+              <h3>首屏</h3>
+              <p>文案与画面错开 60ms，向上 12px。只播放一次，不阻塞阅读。</p>
+            </article>
+          </div>
+          <div class="note">
+            <strong>不要假装：</strong>生成进度只过渡真实百分比，不做无限扫光假装工作；
+            成功状态不做彩带或全屏庆祝。流式光标在减少动效设置下改为静态省略号。
+          </div>
+        </section>
+
+        <section class="section" id="figma" aria-labelledby="figma-title">
+          <div class="section-head">
+            <div class="section-num">06 / FIGMA</div>
+            <div class="section-title">
+              <h2 id="figma-title">先把 Foundations 建好，再画页面。</h2>
+              <p>
+                设计工具首选 Figma；国内协作可用 MasterGo、即时设计或 Pixso。AI 生成只做构图参考，
+                最终界面按本规范的 token 和组件重建。下面的提示词可以直接粘贴到 Figma Make / First Draft、
+                v0 或 Lovable。
+              </p>
+            </div>
+          </div>
+
+          <h3 class="subhead"><span>FILE</span> 文件结构</h3>
+          <pre class="code">AI Video Studio / Design
+├── 00 Cover
+├── 01 Foundations
+│   ├── Color
+│   ├── Type
+│   ├── Spacing &amp; Grid
+│   ├── Radius &amp; Shadow
+│   └── Motion
+├── 02 Components
+│   ├── Buttons
+│   ├── Inputs
+│   ├── Auth
+│   ├── Navigation
+│   ├── Conversation
+│   ├── Generation
+│   └── Feedback
+├── 03 Landing
+│   ├── Desktop 1440
+│   ├── Tablet 1024
+│   └── Mobile 390
+├── 04 Create
+│   ├── Guest Empty
+│   ├── Guest Filled
+│   ├── Auth Modal
+│   ├── Logged In
+│   ├── Generating
+│   └── Success / Failed
+├── 05 Works
+├── 06 Responsive
+└── 07 Prototype</pre>
+
+          <h3 class="subhead"><span>VARIABLES</span> 命名与约束</h3>
+          <div class="grid-2">
+            <div>
+              <pre class="code">color/bg/base
+color/bg/surface
+color/bg/raised
+color/border/subtle
+color/text/primary
+color/text/secondary
+color/text/tertiary
+color/accent/tungsten
+color/accent/tungsten-hover
+color/accent/ink
+color/state/halide
+color/state/success
+color/state/danger
+
+space/1 … space/24
+radius/tag, radius/control, radius/card,
+radius/panel, radius/pill
+type/display, type/h1, type/h2, type/h3,
+type/body, type/label, type/caption, type/mono</pre>
+            </div>
+            <div>
+              <ul class="list">
+                <li>颜色用 Variables，不建零散颜色样式。</li>
+                <li>文字用 Text Styles，命名与 <code>type/*</code> 一致。</li>
+                <li>只建两个 Effect Style：<code>shadow/float</code>、<code>shadow/modal</code>。</li>
+                <li>组件内所有间距用 Auto Layout 和变量，不手拖。</li>
+                <li>P0 只做 Dark 模式，不创建空的 Light 模式。</li>
+                <li>桌面 1440、平板 1024、手机 390 三个帧都要有。</li>
+              </ul>
+            </div>
+          </div>
+
+          <h3 class="subhead"><span>PROTOTYPE</span> 原型连接</h3>
+          <ol class="step-list">
+            <li><span>门户 `立即开始创作` → 工作台游客空态。</span></li>
+            <li><span>工作台输入提示词 → 游客已填写态。</span></li>
+            <li><span>点击 `生成视频` → 登录 Modal（Overlay，不跳页）。</span></li>
+            <li><span>登录成功 → 生成中 → 完成；草稿摘要全程可见。</span></li>
+            <li><span>完成 → 已登录工作台 → 我的作品。</span></li>
+            <li><span>移动端菜单 → 抽屉；生成 → 底部登录抽屉。</span></li>
+          </ol>
+
+          <h3 class="subhead"><span>PROMPTS</span> 可直接粘贴的 AI 设计提示词</h3>
+          <p class="body-copy" style="margin-top: 0">
+            英文提示词对生成工具更稳定。生成后按本规范重建组件，不直接复用生成的代码。
+          </p>
+
+          <div class="prompt-card">
+            <div class="prompt-head"><span>PROMPT A / 门户</span><span>EN</span></div>
+            <pre>Design a desktop landing page for "AI Video Studio", a browser-based AI video creation studio. Canvas 1440×1024.
+
+Art direction: dark cinematic editing room, not a SaaS dashboard. Near-black carbon background #0B0D10, warm bone text #F2EEE6, tungsten amber accent #F2B35C, halide teal secondary #75D8D2. Editorial Chinese serif display for the hero, clean Chinese sans for UI, IBM Plex Mono for small metadata. Restrained borders, almost no shadows, no purple-blue gradients, no glassmorphism, no floating glowing orbs, no robot illustrations.
+
+Top navigation 72px high, max width 1280: crop-mark logo + "AI Video Studio", links 作品 / 能力 / 工作流, right side "登录" text button and "立即开始创作" amber button.
+
+Hero: two columns. Left: eyebrow "AI VIDEO STUDIO / 01", huge headline "把一句话，变成一支片。", subcopy "描述画面、节奏与情绪。AI 帮你整理分镜、生成视频。先写下来，剩下的交给工作室。", two CTAs "立即开始创作" and "看 30 秒示例", small line "无需安装 · 浏览器内创作 · 当前为能力演示". Right: 16:9 showreel frame with a cinematic still, subtle grain, play control, bottom prompt overlay, duration chip.
+
+Below hero: a three-step process "描述画面 → 整理分镜 → 生成视频"; a 3×2 gallery of 16:9 video works with Chinese titles and parameter metadata; a capabilities strip; a final CTA band; footer.
+
+Use real Chinese copy, no lorem ipsum, no emoji. Keep 70% dark neutral, 20% warm white, 8% amber, 2% teal. Make the first frame feel complete without scrolling.</pre>
+          </div>
+
+          <div class="prompt-card">
+            <div class="prompt-head"><span>PROMPT B / 工作台</span><span>EN</span></div>
+            <pre>Design a desktop AI video creation workspace at 1440×1024, for the product "AI Video Studio".
+
+Art direction: dark film studio, carbon #0B0D10 background, surface #12151A, warm bone text #F2EEE6, tungsten amber #F2B35C accent, halide teal #75D8D2 for technical status. Chinese sans UI, IBM Plex Mono metadata. No purple gradients, no glass cards everywhere, no emoji.
+
+Layout: fixed left sidebar 280px, top bar 64px, central conversation max width 760px, bottom composer max width 880px.
+
+Left sidebar: crop-mark logo, full-width "新建创作" button, history groups 今天 / 近 7 天, session rows with title and time. One session is active using a slightly raised surface, not a colored left rail. Bottom user menu.
+
+Top bar: current session title "雨夜霓虹街头", status "实时连接", help icon, avatar.
+
+Center: conversation with one user message "雨夜霓虹街头，慢推镜头，霓虹反射在积水里，电影感" and one assistant reply from "AI 导演" summarizing three shots. Below the reply, a storyboard card with 风格 电影感 / 比例 16:9 / 时长 5s and a primary "生成视频" button.
+
+Below that, a generation card with a 16:9 cinematic poster, state "正在生成画面", progress 68%, and a 4px amber progress bar. The card has "离开页面不会中断" as a quiet note.
+
+Bottom composer: textarea with the next prompt draft, parameter chips 风格 / 比例 / 时长, and a 44px amber "生成视频" button. Enter to generate, Shift+Enter for a new line.
+
+Make the scene feel like a working tool, not a marketing page. Show realistic Chinese content. Use generous spacing and only one elevated element: the composer.</pre>
+          </div>
+
+          <div class="prompt-card">
+            <div class="prompt-head"><span>PROMPT C / 登录 + 移动端</span><span>EN</span></div>
+            <pre>Design two frames for "AI Video Studio".
+
+Frame 1: desktop 1440×1024, an auth modal over a blurred dark create workspace. Modal width 440px, radius 20, background #191D24, backdrop rgba(0,0,0,0.64) with 8px blur. Title "登录后继续生成", body "提示词和参数已经保留。登录或注册后会自动继续。", a one-line draft summary "雨夜霓虹街头，慢推镜头…" with an "已保留" chip. Text segmented switch 登录 / 注册. Login fields 账号 and 密码. Primary amber button "登录并继续". Secondary link "还没有账号？注册". Small legal line. Close button. No social login.
+
+Frame 2: mobile 390×844, the create workspace. Top bar 56px with menu, title, avatar. Conversation messages full width with 16px side padding. Bottom composer fixed to the bottom with safe-area padding, 2-row textarea, horizontal parameter chips, round amber send button. Show a bottom sheet auth variant with a 36×4 drag handle, title "登录后继续生成", draft summary, and the same form.
+
+Art direction: carbon #0B0D10, surface #12151A, raised #191D24, warm bone #F2EEE6, tungsten amber #F2B35C, halide teal #75D8D2. Chinese sans UI. No purple gradients, no emoji, no oversized illustration. Keep the modal and sheet calm and readable.</pre>
+          </div>
+          <p class="prompt-note">生成后检查：是否出现紫色渐变、过量玻璃拟态、假额度、假社交登录、无法解释的光球。出现任何一项就重建。</p>
+
+          <h3 class="subhead"><span>HANDOFF</span> 交付检查</h3>
+          <ul class="checklist is-checked">
+            <li>颜色全部来自 Variables。</li>
+            <li>文字全部使用 Text Styles。</li>
+            <li>门户 → 工作台 → 登录 → 生成 → 完成可走通。</li>
+            <li>游客、登录、错误、空、加载状态齐全。</li>
+            <li>1440 / 1024 / 390 三个宽度检查过。</li>
+            <li>200% 文字缩放不裁切。</li>
+            <li>图标同一套、24px、1.5px 描边。</li>
+            <li>封面 16:9 且有来源或示例标注。</li>
+            <li>未实现的额度、会员、社交登录不出现。</li>
+            <li>P0 / P1 标注清楚，假功能不做成可点。</li>
+          </ul>
+        </section>
+
+        <section class="section" id="mapping" aria-labelledby="mapping-title">
+          <div class="section-head">
+            <div class="section-num">07 / MAPPING</div>
+            <div class="section-title">
+              <h2 id="mapping-title">设计落地时，先改路由和登录闸门。</h2>
+              <p>
+                当前代码把 `/` 和 `/chat` 都放在 `ProtectedRoute` 后面，登录是独立页面。
+                目标是把 `/` 和 `/create` 公开，只保护 `/works`，登录改为同页 Modal。
+                本轮不改代码，下面是后续实现的映射。
+              </p>
+            </div>
+          </div>
+
+          <h3 class="subhead"><span>ROUTES</span> 路由变化</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>现在</th><th>目标</th><th>动作</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>/</code> → <code>/chat</code></td><td><code>/</code> Landing</td><td>公开；已登录重定向 <code>/create</code></td></tr>
+                <tr><td><code>/chat</code> 受保护</td><td><code>/create</code> 公开</td><td>游客可输入；生成时登录</td></tr>
+                <tr><td><code>/project</code> 受保护</td><td><code>/works</code> 受保护</td><td>任务表格改为作品网格</td></tr>
+                <tr><td><code>/login</code> 主入口</td><td><code>/login</code> 兜底</td><td>常规流程使用 AuthModal</td></tr>
+                <tr><td><code>ProtectedRoute</code> 包全部</td><td>只包 <code>/works</code></td><td><code>/</code> 与 <code>/create</code> 公开</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="subhead"><span>FILES</span> 文件与组件</h3>
+          <div class="grid-2">
+            <pre class="code">新增
+src/pages/Landing/index.tsx
+src/pages/Create/index.tsx
+src/pages/Works/index.tsx
+src/components/landing/Hero.tsx
+src/components/landing/Showreel.tsx
+src/components/landing/ExampleGallery.tsx
+src/components/auth/AuthModal.tsx
+src/components/create/PromptComposer.tsx
+src/components/create/GenerationCard.tsx
+src/components/create/StoryboardCard.tsx
+src/components/create/WorkspaceSidebar.tsx
+src/components/create/WorkspaceTopBar.tsx
+src/components/common/EmptyState.tsx
+src/components/common/SocketBadge.tsx
+src/layouts/LandingLayout.tsx
+src/layouts/CreateLayout.tsx
+src/layouts/WorksLayout.tsx
+src/stores/draftStore.ts
+src/hooks/useAuthGate.ts</pre>
+            <pre class="code">调整
+src/router/index.tsx
+src/router/ProtectedRoute.tsx
+src/layouts/AppLayout.tsx
+src/pages/Chat/index.tsx      → Create
+src/pages/Project/index.tsx   → Works
+src/components/chat/SessionList.tsx
+src/components/chat/ChatInput.tsx
+src/components/chat/VideoCard.tsx
+src/pages/Login/index.tsx
+src/pages/Register/index.tsx
+src/stores/chatStore.ts
+src/hooks/useChatSocket.ts
+src/App.tsx                   主题 token</pre>
+          </div>
+
+          <h3 class="subhead"><span>STATE</span> 草稿与登录闸门</h3>
+          <div class="grid-2">
+            <div>
+              <ul class="list">
+                <li><code>useAuthGate</code> 保存 <code>reason</code>、<code>pendingPrompt</code>、<code>pendingParams</code>。</li>
+                <li>登录成功后执行一次 <code>completeGate</code>，执行完清空，防止重复提交。</li>
+                <li>游客不调用 <code>loadSessions</code>，不建立 WebSocket。</li>
+                <li><code>useChatSocket</code> 增加 <code>enabled</code>，只在有 token 时挂载。</li>
+                <li>草稿写入 <code>sessionStorage</code>，键名 <code>aivideo.create.draft</code>。</li>
+                <li>成功后清除草稿；失败保留；手动清空时同步删除。</li>
+              </ul>
+            </div>
+            <pre class="code">type AuthGateReason = 'generate' | 'works' | 'expired';
+
+interface AuthGateState {
+  open: boolean;
+  mode: 'login' | 'register';
+  reason: AuthGateReason | null;
+  pendingPrompt: string | null;
+  pendingParams: Record&lt;string, unknown&gt; | null;
+  openGate: (payload: {
+    reason: AuthGateReason;
+    prompt?: string;
+  }) =&gt; void;
+  closeGate: () =&gt; void;
+  completeGate: () =&gt; Promise&lt;void&gt; | void;
+}</pre>
+          </div>
+
+          <h3 class="subhead"><span>API</span> 当前接口与 P0 编排</h3>
+          <div class="note">
+            <strong>P0 不改后端：</strong>登录成功后创建会话，发送消息；助手返回 <code>videoIntent=true</code> 后，
+            前端用同一段提示词和参数调用 <code>/video/tasks</code>，生成卡显示任务进度。游客阶段不请求任何受保护接口。
+          </div>
+          <div class="table-wrap" style="margin-top: 16px">
+            <table>
+              <thead>
+                <tr><th>能力</th><th>接口</th><th>限制</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>登录 / 注册</td><td><code>/auth/login</code> <code>/auth/register</code></td><td>可直接复用</td></tr>
+                <tr><td>会话 / 消息</td><td><code>/chat/sessions</code> <code>/chat/messages</code></td><td>消息只接收 content，不含风格/比例/时长</td></tr>
+                <tr><td>视频任务</td><td><code>/video/tasks</code></td><td>接收 prompt 与 params，可轮询列表</td></tr>
+                <tr><td>实时进度</td><td><code>/ws/chat</code></td><td>已有 <code>video.progress</code>；游客不连接</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="body-copy" style="margin-top: 14px">
+            P1 建议增加 <code>creation</code> 聚合接口，或在消息 metadata 中保存 <code>videoTaskId</code>，
+            让会话与作品形成稳定关联。当前会话消息与视频任务没有持久化关联，刷新后生成卡只在作品页恢复。
+          </p>
+
+          <h3 class="subhead"><span>PHASES</span> 分阶段</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>阶段</th><th>内容</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>P0</td><td>门户、公开 `/create`、AuthModal、草稿保留、登录后继续、生成卡、作品页、暗色 token</td></tr>
+                <tr><td>P1</td><td>会话/任务关联、搜索历史、参数进入消息、下载、重试策略、移动抽屉细节</td></tr>
+                <tr><td>P2</td><td>浅色模式、团队协作、额度/会员、模板市场、作品分享页</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="subhead"><span>ACCEPTANCE</span> 实现验收</h3>
+          <ul class="checklist">
+            <li>未登录访问 <code>/create</code> 可直接输入，不跳登录页。</li>
+            <li>点击生成打开同页 Modal，提示词和参数不丢失。</li>
+            <li>登录成功后自动继续，不重复提交。</li>
+            <li>关闭 Modal 后草稿仍在；刷新后可恢复。</li>
+            <li>已登录访问 <code>/</code> 直接进入 <code>/create</code>。</li>
+            <li>游客不调用会话接口，不建立 WebSocket。</li>
+            <li>生成卡按真实进度显示，不出现假阶段。</li>
+            <li>失败后可以重试，提示词和参数保留。</li>
+            <li>会话过期时保留草稿并重新打开登录。</li>
+            <li>作品页能区分生成中、完成、失败。</li>
+            <li>1440 / 1024 / 390 无横向溢出。</li>
+            <li>键盘可完成输入、提交、关闭 Modal；焦点可见。</li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-brand">
+      <svg viewBox="0 0 28 28" fill="none" aria-hidden="true">
+        <path d="M4 10V4h6M18 4h6v6M24 18v6h-6M10 24H4v-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <circle cx="14" cy="14" r="2.4" fill="currentColor"/>
+      </svg>
+      AI Video Studio
+    </div>
+    <div class="footer-meta">
+      <div>DESIGN SPEC <strong>v1.0</strong> / 2026-10-27</div>
+      <div>下一步：Foundations → 核心组件 → 原型 → 代码映射</div>
+    </div>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+    var sections = links
+      .map(function (link) {
+        var id = link.getAttribute('href').slice(1);
+        return document.getElementById(id);
+      })
+      .filter(Boolean);
+
+    if (!sections.length || !('IntersectionObserver' in window)) {
+      return;
+    }
+
+    var visible = new Map();
+
+    function setCurrent(id) {
+      links.forEach(function (link) {
+        var isCurrent = link.getAttribute('href') === '#' + id;
+        if (isCurrent) {
+          link.setAttribute('aria-current', 'true');
+        } else {
+          link.removeAttribute('aria-current');
+        }
+      });
+    }
+
+    var observer = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            visible.set(entry.target.id, entry.boundingClientRect.top);
+          } else {
+            visible.delete(entry.target.id);
+          }
+        });
+
+        if (!visible.size) {
+          return;
+        }
+
+        var current = Array.from(visible.entries()).sort(function (a, b) {
+          return Math.abs(a[1]) - Math.abs(b[1]);
+        })[0];
+
+        if (current) {
+          setCurrent(current[0]);
+        }
+      },
+      { rootMargin: '-15% 0px -65% 0px', threshold: [0, 0.1, 1] }
+    );
+
+    sections.forEach(function (section) {
+      observer.observe(section);
+    });
+  })();
+</script>
