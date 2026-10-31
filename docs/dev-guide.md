@@ -187,23 +187,33 @@ mvn test                                             # 测试（当前暂无用�
 | `DB_POOL_*` | Druid 初始、最小、最大连接数与等待时间 | 见 `.env.example` |
 | `REDIS_*` | Redis 连接 | 见 `.env.example` |
 | `AGENTSCOPE_ENABLED` | 是否启用真实 Agent | 默认 `false` |
-| `AGENTSCOPE_MODEL` | 模型标识 | 如 `dashscope:qwen-plus` |
-| `DASHSCOPE_API_KEY` | 模型厂商 Key | 启用真实模型时必填 |
+| `AGENTSCOPE_MODEL` | 模型标识，需 `deepseek:` 前缀 | `deepseek:deepseek-v4-flash` |
+| `DEEPSEEK_API_KEY` | DeepSeek Key | 启用真实模型时必填 |
+| `DEEPSEEK_BASE_URL` | DeepSeek / 兼容网关地址 | `https://api.deepseek.com` |
+| `AGENTSCOPE_TIMEOUT` | 单次模型调用超时 | `PT15S`（需小于前端 20s） |
+| `AGENTSCOPE_MAX_ITERS` / `AGENTSCOPE_MAX_ATTEMPTS` | ReAct 迭代上限 / 模型调用尝试次数 | `3` / `1` |
 
 完整清单见 [`backend/.env.example`](../backend/.env.example)。不要提交真实 `.env` 或密钥；`.gitignore` 已忽略 `.env`。
 
-### 4.3 启用 AgentScope 真实模型
+### 4.3 启用 DeepSeek 真实模型
 
 1. 设置 `AGENTSCOPE_ENABLED=true`。
-2. 设置 `AGENTSCOPE_MODEL` 为 AgentScope 支持的模型标识。
-3. 注入对应厂商的 API Key（如 `DASHSCOPE_API_KEY`）。
-4. 重启后端，确认 `ReActAgent` Bean 创建成功。
+2. 设置 `DEEPSEEK_API_KEY`（必填）；如走代理/私有网关，再设置 `DEEPSEEK_BASE_URL`。
+3. 按需调整 `AGENTSCOPE_MODEL`（默认 `deepseek:deepseek-v4-flash`）与 `AGENTSCOPE_TIMEOUT`。
+4. 重启后端，确认日志出现 `AgentScope 真实模型: model=deepseek:...`。
 
-未启用时使用 `MockModelProvider`，不会发起任何网络请求。真实模式下仍需完善：
+未启用时使用 `MockModelProvider`，不会发起任何网络请求。注意：
 
-- 从 AgentScope 工具调用事件提取 `toolName`（当前为关键词识别）。
+- `AGENTSCOPE_ENABLED=true` 但 `DEEPSEEK_API_KEY` 为空时会**启动失败**，这是刻意设计，避免静默回退掩盖配置错误。
+- 模型调用的超时/限流/鉴权失败/5xx 分别映射为业务码 `50400` / `42900` / `50200` / `50300`（见 `docs/api-convention.md`）。鉴权失败返回 502 而非 401，不会触发前端重新登录。
+- 模型调用发生在数据库事务之外；调用失败时不写入用户/助手消息。
+
+真实模式下仍待完善：
+
+- 从 AgentScope 工具调用事件提取 `toolName`（当前仍为关键词识别）。
 - 使用 AgentScope 的会话/记忆机制替代手动拼接历史。
-- 处理模型超时、限流与失败重试。
+- token 级真流式（当前仍是完整回复切片推送）。
+- 自动重试/退避/熔断（当前 `AGENTSCOPE_MAX_ATTEMPTS` 默认 1）。
 
 ### 4.4 MinIO
 

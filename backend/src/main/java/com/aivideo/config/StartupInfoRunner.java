@@ -1,5 +1,6 @@
 package com.aivideo.config;
 
+import com.aivideo.agent.AgentScopeProperties;
 import com.alibaba.druid.pool.DruidDataSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ public class StartupInfoRunner implements ApplicationRunner {
     private final DataSource dataSource;
     private final RedisProperties redisProperties;
     private final RedisConnectionFactory redisConnectionFactory;
+    private final AgentScopeProperties agentScopeProperties;
     private final Environment environment;
 
     @Override
@@ -63,6 +65,15 @@ public class StartupInfoRunner implements ApplicationRunner {
             pingRedis();
         } else {
             log.info("Redis          : 当前 TokenStore 为 {}，跳过 PING", tokenStore);
+        }
+
+        if (agentScopeProperties.isEnabled()) {
+            log.info("AgentScope     : enabled=true, model={}, baseUrl={}, timeout={}",
+                    agentScopeProperties.getModel(),
+                    agentScopeProperties.getBaseUrl(),
+                    agentScopeProperties.getTimeout());
+        } else {
+            log.info("AgentScope     : enabled=false（Mock ModelProvider）");
         }
         log.info("==================================");
     }

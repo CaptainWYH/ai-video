@@ -24,7 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -33,6 +33,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
@@ -49,6 +50,7 @@ public class ChatServiceImpl implements ChatService {
     private final AgentScopeProperties agentScopeProperties;
     private final ChatPushService chatPushService;
     private final ObjectMapper objectMapper;
+    private final TransactionTemplate transactionTemplate;
 
     @Override
     public ChatSessionResponse createSession(Long userId, CreateSessionRequest request) {
@@ -89,38 +91,42 @@ public class ChatServiceImpl implements ChatService {
     }
 
     @Override
-    @Transactional
     public ChatMessageResponse sendMessage(Long userId, SendMessageRequest request) {
         ChatSession session = getOwnedSession(userId, request.getSessionId());
         List<AgentMessage> history = loadHistory(session.getId());
 
-        ChatMessage userMessage = new ChatMessage();
-        userMessage.setSessionId(session.getId());
-        userMessage.setUserId(userId);
-        userMessage.setRole(ChatMessage.ROLE_USER);
-        userMessage.setContent(request.getContent());
-        userMessage.setMessageType("TEXT");
-        chatMessageMapper.insert(userMessage);
-
+        // 模型调用在事务外，避免真实网络请求长时间占用数据库连接。
         AgentReply reply = agentFactory.getAgent()
                 .chat(new AgentRequest(userId, session.getId(), request.getContent(), history));
 
-        ChatMessage assistantMessage = new ChatMessage();
-        assistantMessage.setSessionId(session.getId());
-        assistantMessage.setUserId(userId);
-        assistantMessage.setRole(ChatMessage.ROLE_ASSISTANT);
-        assistantMessage.setContent(reply.content());
-        assistantMessage.setMessageType(reply.videoIntent() ? "VIDEO_CARD" : "TEXT");
-        assistantMessage.setMetadata(buildMetadata(reply));
-        chatMessageMapper.insert(assistantMessage);
+        // 模型成功后再落库：用户消息、助手消息与会话更新放在同一个短事务中。
+        ChatMessageResponse response = Objects.requireNonNull(transactionTemplate.execute(status -> {
+            ChatMessage userMessage = new ChatMessage();
+            userMessage.setSessionId(session.getId());
+            userMessage.setUserId(userId);
+            userMessage.setRole(ChatMessage.ROLE_USER);
+            userMessage.setContent(request.getContent());
+            userMessage.setMessageType("TEXT");
+            chatMessageMapper.insert(userMessage);
 
-        session.setLastMessageAt(LocalDateTime.now());
-        if (DEFAULT_SESSION_TITLE.equals(session.getTitle())) {
-            session.setTitle(abbreviate(request.getContent(), 30));
-        }
-        chatSessionMapper.updateById(session);
+            ChatMessage assistantMessage = new ChatMessage();
+            assistantMessage.setSessionId(session.getId());
+            assistantMessage.setUserId(userId);
+            assistantMessage.setRole(ChatMessage.ROLE_ASSISTANT);
+            assistantMessage.setContent(reply.content());
+            assistantMessage.setMessageType(reply.videoIntent() ? "VIDEO_CARD" : "TEXT");
+            assistantMessage.setMetadata(buildMetadata(reply));
+            chatMessageMapper.insert(assistantMessage);
 
-        ChatMessageResponse response = toResponse(assistantMessage);
+            session.setLastMessageAt(LocalDateTime.now());
+            if (DEFAULT_SESSION_TITLE.equals(session.getTitle())) {
+                session.setTitle(abbreviate(request.getContent(), 30));
+            }
+            chatSessionMapper.updateById(session);
+
+            return toResponse(assistantMessage);
+        }));
+
         String requestId = StringUtils.hasText(request.getRequestId())
                 ? request.getRequestId() : UUID.randomUUID().toString();
         chatPushService.streamAssistantMessage(userId, session.getId(), requestId, response);

@@ -15,7 +15,11 @@ public enum ResultCode {
     FORBIDDEN(40300, "没有权限执行该操作", HttpStatus.FORBIDDEN),
     NOT_FOUND(40400, "资源不存在", HttpStatus.NOT_FOUND),
     CONFLICT(40900, "资源冲突", HttpStatus.CONFLICT),
-    INTERNAL_ERROR(50000, "服务器内部错误", HttpStatus.INTERNAL_SERVER_ERROR);
+    MODEL_RATE_LIMITED(42900, "模型调用过于频繁，请稍后重试", HttpStatus.TOO_MANY_REQUESTS),
+    INTERNAL_ERROR(50000, "服务器内部错误", HttpStatus.INTERNAL_SERVER_ERROR),
+    MODEL_AUTH_FAILED(50200, "模型服务鉴权失败，请联系管理员", HttpStatus.BAD_GATEWAY),
+    MODEL_UNAVAILABLE(50300, "模型服务暂不可用，请稍后重试", HttpStatus.SERVICE_UNAVAILABLE),
+    MODEL_TIMEOUT(50400, "模型响应超时，请稍后重试", HttpStatus.GATEWAY_TIMEOUT);
 
     private final int code;
     private final String message;

@@ -58,7 +58,7 @@ mvn test
 - 默认 Profile 连接 MySQL（Druid 连接池）+ Redis，支持通过 `DB_URL` / `DB_HOST` 等环境变量接入外部 MySQL；`dev` Profile 使用 H2（MySQL 兼容模式，同样走 Druid）与 `InMemoryTokenStore`，H2 数据在重启后丢失。
 - 生产敏感配置必须来自环境变量，尤其是 `JWT_SECRET`、数据库密码、模型厂商 Key。`application.yml` 中的值仅是本地开发默认值。
 - 前端不建 `.env` 时走 Vite 代理：`/api`、`/ws` → `localhost:8080`。`VITE_API_BASE_URL` 默认 `/api/v1`。
-- AgentScope 默认关闭（`AGENTSCOPE_ENABLED=false`），使用 `MockModelProvider`，不发起网络请求。启用真实模型需同时提供厂商 Key。
+- AgentScope 默认关闭（`AGENTSCOPE_ENABLED=false`），使用 `MockModelProvider`，不发起网络请求。启用真实模型需同时设置 `AGENTSCOPE_ENABLED=true` 与 `DEEPSEEK_API_KEY`，默认模型 `deepseek:deepseek-v4-flash`；启用但缺 Key 会启动失败（刻意设计）。
 
 ## 架构要点
 
@@ -74,8 +74,8 @@ mvn test
 - 统一响应 `Result<T>`（`code/message/data`，成功 `code=0`），分页 `Result<PageResult<T>>`；业务错误抛 `BizException`，由 `GlobalExceptionHandler` 转换。HTTP 状态与业务 code 对应，code 定义见 `common/ResultCode.java`。
 - 认证：access + refresh 双 JWT；refresh 刷新时旋转并消费旧 `jti`；`TokenStore` 有 Redis 白名单/黑名单与内存两种实现。JWT 过滤器写入 `UserPrincipal`，业务层用 `SecurityUtils.currentUserId()`。
 - 公开路径仅注册、登录、刷新、`/ws/**`、Swagger、`/error`；其余接口必须登录。
-- 对话链路：`ChatServiceImpl.sendMessage` 校验会话归属 → 加载历史 → 保存用户消息 → `AgentFactory` 调用 `ChatAgent` → 保存助手消息 → 更新会话标题/时间 → 同步返回并异步调用 `ChatPushService` 推流。`ChatService` 不直接依赖具体模型。
-- Agent 选择由配置驱动：`MockModelProvider`（默认）或 `AgentScopeChatAgent` + `ReActAgent`；工具在 `AgentScopeConfig` 注册。
+- 对话链路：`ChatServiceImpl.sendMessage` 校验会话归属 → 加载历史 → **事务外** `AgentFactory` 调用 `ChatAgent` → 单事务保存用户消息/助手消息并更新会话标题/时间 → 同步返回并异步调用 `ChatPushService` 推流。`ChatService` 不直接依赖具体模型。
+- Agent 选择由配置驱动：`MockModelProvider`（默认）或 `AgentScopeChatAgent` + `ReActAgent`；真实模型通过 `ModelRegistry.resolve("deepseek:<model>")` 交给 `agentscope-extensions-model-openai` 的 DeepSeek provider；工具在 `AgentScopeConfig` 注册。
 - WebSocket 事件为 `{type, data}`：`chat.chunk`、`chat.done`、`video.progress`、`pong`。握手通过 query token 鉴权。
 - 视频任务：`VideoGenerationServiceImpl` 创建 `PENDING` 记录后由 `videoTaskExecutor` 模拟推进到 `SUCCESS`，结果 URL 是 `https://example.com/mock-video/{id}.mp4`。
 - 主键使用数据库自增（避免 JS 精度问题）；所有表有 `deleted` 逻辑删除字段。
@@ -99,7 +99,7 @@ mvn test
 3. **数据归属**：所有用户数据查询带 `userId`；跨用户访问返回 NOT_FOUND，不泄露资源存在性。
 4. **敏感信息**：数据库密码、JWT 密钥、AI/视频厂商 Key 一律通过环境变量，禁止写入源码、配置默认值之外的硬编码或提交 `.env`。
 5. **技术版本约束**：保持 React 18、React Router v6、Vite 5、Spring Boot 3.x、Java 21；升级大版本需先征得用户同意。
-6. **占位边界**：不要擅自把 Mock 对话替换为真实模型，或把模拟视频任务替换为真实厂商调用；这类接入属于明确的 TODO 范围。
+6. **占位边界**：对话模型已按 DeepSeek 最小方案接入，不要擅自更换厂商、改成 token 级流式或引入 RAG；视频生成与 MinIO 仍是占位，不要擅自替换为真实厂商调用。
 7. **提交前验证**：
    - 前端至少执行 `npm run build` 与 `npm run lint`。
    - 后端至少执行 `mvn -DskipTests package`（JDK 21）。
@@ -108,7 +108,8 @@ mvn test
 
 ## 已知限制
 
-- WebSocket 的流式输出是完整回复切片，不是模型 token 级流式。
-- Mock 意图识别基于关键词；真实模式仍需从 AgentScope 工具事件提取 `toolName`。
+- WebSocket 的流式输出是完整回复切片，不是模型 token 级流式（Mock 与 DeepSeek 模式相同）。
+- 意图识别仍基于关键词（Mock 与真实模式相同）；后续需从 AgentScope 工具事件提取 `toolName`。
+- 模型调用失败时不写入用户/助手消息，暂无请求幂等。
 - 视频任务状态由进程内线程池推进，重启后未完成任务不会恢复。
 - MinIO/S3、验证码、限流、真实任务队列尚未实现。

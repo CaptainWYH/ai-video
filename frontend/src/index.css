@@ -2472,7 +2472,7 @@ svg {
 }
 
 .composer-textarea {
-  padding: 0 2px !important;
+  padding: 0 !important;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
@@ -2515,7 +2515,10 @@ svg {
   background: var(--wash-weak);
 }
 
+/* 与 chip 内部高度对齐：Select 根节点默认 32px，箭头按根节点垂直居中，
+   若只压缩 selector 高度，文字会比箭头高约 3px。 */
 .composer-param .ant-select {
+  height: 26px;
   color: var(--text-2);
   font-size: 12px;
 }
@@ -2559,7 +2562,7 @@ svg {
   justify-content: space-between;
   gap: 14px;
   margin-top: 9px;
-  padding: 0 2px;
+  padding: 0;
   color: var(--text-dim);
   font-family: var(--mono);
   font-size: 11px;

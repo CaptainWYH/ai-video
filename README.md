@@ -2,7 +2,7 @@
 
 面向 PC 端的 AI 视频创作工具骨架。以「对话 → 分镜 → 视频任务」为主线，前后端分离，当前阶段聚焦工程结构、认证闭环、对话闭环与视频任务占位流程。
 
-> 本仓库是**可运行的最小闭环骨架**：用户注册/登录、会话与消息持久化、Mock Agent 回复、WebSocket 模拟流式输出、视频任务状态模拟均已打通；真实大模型与真实视频生成尚未接入。
+> 本仓库是**可运行的最小闭环骨架**：用户注册/登录、会话与消息持久化、Mock / DeepSeek 可切换的对话、WebSocket 模拟流式输出、视频任务状态模拟均已打通；真实视频生成尚未接入。
 
 ## 技术栈
 
@@ -11,7 +11,7 @@
 | 前端 | React 18、TypeScript、Vite 5、Ant Design 5、Zustand、React Router 6、Axios |
 | 后端 | Java 21、Spring Boot 3.3、Spring Security、Spring WebSocket、MyBatis-Plus、SpringDoc |
 | 存储 | MySQL 8、Redis 7、MinIO（接口预留） |
-| AI | AgentScope Java 2.0（`ReActAgent` + `Toolkit`），默认 Mock 模式 |
+| AI | AgentScope Java 2.0（`ReActAgent` + `Toolkit`），默认 Mock，可切换 DeepSeek（OpenAI 兼容） |
 | 认证 | JWT access token + refresh token（刷新旋转、Redis 白名单/黑名单） |
 
 ## 目录结构
@@ -152,8 +152,11 @@ cp .env.example .env
 | `STORAGE_PROVIDER` | 对象存储实现 | `minio` |
 | `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` / `MINIO_BUCKET` | MinIO 配置 | `http://localhost:9000` / `minioadmin` / `minioadmin` / `aivideo` |
 | `AGENTSCOPE_ENABLED` | 是否启用真实 Agent | `false` |
-| `AGENTSCOPE_MODEL` | AgentScope 模型标识 | `dashscope:qwen-plus` |
-| `DASHSCOPE_API_KEY` | 启用真实模型时的厂商 Key | 无 |
+| `AGENTSCOPE_MODEL` | AgentScope 模型标识（需 `deepseek:` 前缀） | `deepseek:deepseek-v4-flash` |
+| `DEEPSEEK_API_KEY` | 启用真实模型时必填 | 无 |
+| `DEEPSEEK_BASE_URL` | DeepSeek / 兼容网关地址 | `https://api.deepseek.com` |
+| `AGENTSCOPE_TIMEOUT` | 单次模型调用超时（需小于前端 20s） | `PT15S` |
+| `AGENTSCOPE_MAX_ITERS` / `AGENTSCOPE_MAX_ATTEMPTS` | ReAct 迭代上限 / 模型调用尝试次数 | `3` / `1` |
 
 ### 前端（`frontend/.env.example`）
 
@@ -165,14 +168,15 @@ cp .env.example .env
 ## 已实现功能
 
 - **用户闭环**：注册（BCrypt 加密）、登录（用户名或邮箱）、刷新 token、登出、`/auth/me`；前端表单校验与错误提示。
-- **对话闭环**：创建会话、会话分页、历史消息分页、发送消息；消息持久化到 MySQL；Mock Agent 返回中文回复并识别视频意图。
+- **对话闭环**：创建会话、会话分页、历史消息分页、发送消息；消息持久化到 MySQL；默认 Mock Agent 不发起网络请求，设置 `AGENTSCOPE_ENABLED=true` + `DEEPSEEK_API_KEY` 后切换真实 DeepSeek。
 - **实时输出**：原生 WebSocket `/ws/chat?token=...`，后端按 6 字符/40ms 推送 `chat.chunk`，结束发送 `chat.done`；前端带 5 秒同步兜底。
 - **视频任务**：`POST /video/tasks` 创建任务、查询详情/分页列表；异步模拟 `PENDING → RUNNING 30% → RUNNING 70% → SUCCESS 100%`。
 - **工程能力**：统一 `Result<T>` / 错误码 / 全局异常处理、参数校验、Swagger 注解、CORS、逻辑删除、统一分页、对象存储扩展点。
 
 ## 当前占位与 TODO
 
-- [ ] 接入真实大模型：设置 `AGENTSCOPE_ENABLED=true` 与厂商 Key，并从 AgentScope 工具调用事件中提取真实意图（当前为关键词识别）。
+- [x] 接入真实大模型：已按最小可用方案接入 DeepSeek（`agentscope-extensions-model-openai` + `deepseek:` provider）。
+- [ ] 模型体验增强：token 级真流式、从 AgentScope 工具调用事件提取真实意图（当前仍为关键词识别与完整回复切片）。
 - [ ] 接入真实视频生成服务（如可灵、即梦、Runway 等），替换 `VideoGenerationServiceImpl` 中的模拟状态机。
 - [ ] 使用 Redis / MQ 承载视频任务队列，支持重试、超时、取消与回调。
 - [ ] MinIO 实际写入与预签名 URL（`MinioObjectStorageService` 目前仅保留接口）。

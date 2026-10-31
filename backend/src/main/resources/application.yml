@@ -9,6 +9,7 @@ spring:
     # 自动读取 backend/.env（不存在则忽略）；系统环境变量优先级更高。
     # 从 backend 目录启动用第一个，从仓库根目录启动用第二个。
     import:
+      - optional:file:.env[.properties]
       - optional:file:./backend/.env[.properties]
   datasource:
     # 外部数据库可整体覆盖 DB_URL（含 SSL、超时等参数）；只改主机时用 DB_HOST / DB_PORT / DB_NAME
@@ -91,7 +92,15 @@ app:
   agentscope:
     # 默认关闭：使用 Mock ModelProvider，不发起真实模型调用
     enabled: ${AGENTSCOPE_ENABLED:false}
-    model: ${AGENTSCOPE_MODEL:dashscope:qwen-plus}
+    model: ${AGENTSCOPE_MODEL:deepseek:deepseek-v4-flash}
+    # 仅 enabled=true 时必填；为空会启动失败
+    api-key: ${DEEPSEEK_API_KEY:}
+    # 不要留空：空值可能回落到其他厂商默认地址
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    # 单次模型调用超时；前端 axios 为 20s，这里需留出余量
+    timeout: ${AGENTSCOPE_TIMEOUT:PT15S}
+    max-iters: ${AGENTSCOPE_MAX_ITERS:3}
+    max-attempts: ${AGENTSCOPE_MAX_ATTEMPTS:1}
     max-history-messages: 20
     sys-prompt: >-
       你是 AI Video Studio 的视频创作助手。你擅长把用户的创意拆解为剧本、分镜和镜头参数，

@@ -201,11 +201,12 @@ sequenceDiagram
 
 1. 校验会话归属（会话必须属于当前用户）。
 2. 加载最近 `app.agentscope.max-history-messages` 条历史消息。
-3. 保存用户消息。
-4. 通过 `AgentFactory.getAgent().chat(AgentRequest)` 获取 `AgentReply`。
-5. 保存助手消息（`role=ASSISTANT`，可带 `videoIntent` / `toolName`）。
-6. 更新会话 `lastMessageAt`；首条消息时用前 30 个字符生成标题。
-7. 通过 `ChatPushService` 异步推送模拟分片，同时同步返回完整消息。
+3. 在**事务外**通过 `AgentFactory.getAgent().chat(AgentRequest)` 获取 `AgentReply`，避免模型网络调用占用数据库连接。
+4. 在同一个短事务中保存用户消息、助手消息（`role=ASSISTANT`，可带 `videoIntent` / `toolName`）并更新会话。
+5. 更新会话 `lastMessageAt`；首条消息时用前 30 个字符生成标题。
+6. 事务提交后通过 `ChatPushService` 异步推送模拟分片，同时同步返回完整消息。
+
+模型调用失败时不写入任何消息，与前端移除乐观消息的行为一致。
 
 Agent 层解耦：
 
@@ -215,14 +216,16 @@ ChatService
          └── ChatAgent（唯一实现）
                ├── ProviderChatAgent → MockModelProvider（默认，无网络）
                └── AgentScopeChatAgent → ReActAgent + Toolkit（AGENTSCOPE_ENABLED=true）
+                                           └── ModelRegistry.resolve("deepseek:<model>") → DeepSeek provider
 ```
 
-- 版本假设：当前基于 `io.agentscope:agentscope-core:2.0.2` 编译验证（Java 17+）；升级 AgentScope 时需复核 `ReActAgent` / `Toolkit` 的 API 签名。
+- 版本假设：当前基于 `io.agentscope:agentscope-core:2.0.2` 与 `agentscope-extensions-model-openai:2.0.2` 编译验证（Java 21）；升级 AgentScope 时需复核 `ReActAgent` / `Toolkit` / `ModelCreationContext` 的 API 签名。
+- 真实模型通过 `deepseek:` 前缀交给扩展模块的 `DeepSeekModelProvider`，自动处理 DeepSeek 的 formatter 与兼容细节；Key 来自 `DEEPSEEK_API_KEY`。
 - `VideoAssistantAgent` 的人格与模型由 `AgentScopeConfig` 创建，系统提示词可通过 `app.agentscope.sys-prompt` 调整。
 - 已注册两个占位工具：
   - `generateStoryboard`：生成分镜占位结果。
   - `generateVideoClip`：生成视频片段占位结果。
-- 默认 Mock 模式通过关键词识别意图（分镜 / 视频 / 镜头），仅用于演示；接入真实模型后应从 AgentScope 的工具调用事件中提取。
+- Mock 与真实模式目前都通过关键词识别意图（分镜 / 视频 / 镜头）；后续应从 AgentScope 的工具调用事件中提取。
 
 ### 3.4 WebSocket 协议
 
@@ -300,8 +303,9 @@ stateDiagram-v2
 
 ## 6. 已知边界
 
-- WebSocket 模拟流式输出是**发送完整消息后切片推送**，不是模型 token 级流式。
-- Mock 意图识别基于关键词，真实工具调用结果尚未回传。
+- WebSocket 模拟流式输出是**发送完整消息后切片推送**，不是模型 token 级流式（真实 DeepSeek 模式同样如此）。
+- 意图识别仍基于关键词，真实工具调用结果尚未回传。
+- 真实模型调用在事务外执行；失败时用户与助手消息均不落库，暂不做请求幂等。
 - 视频任务状态在内存异步线程中推进；应用重启后未完成任务不会自动恢复。
 - 刷新 token 的白名单依赖 Redis；`memory` 模式不支持多实例。
 - 未实现验证码、限流、登录失败锁定、文件上传与前端项目管理页面。

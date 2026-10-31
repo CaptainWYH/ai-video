@@ -111,6 +111,12 @@
             <artifactId>agentscope-core</artifactId>
             <version>${agentscope.version}</version>
         </dependency>
+        <!-- OpenAI 兼容模型扩展：提供 DeepSeek provider（deepseek:<model>）。 -->
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-model-openai</artifactId>
+            <version>${agentscope.version}</version>
+        </dependency>
 
         <!-- Lombok -->
         <dependency>

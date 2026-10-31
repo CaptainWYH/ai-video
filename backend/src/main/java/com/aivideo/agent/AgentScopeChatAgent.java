@@ -1,5 +1,7 @@
 package com.aivideo.agent;
 
+import com.aivideo.common.BizException;
+import com.aivideo.common.ResultCode;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.Msg;
@@ -7,6 +9,7 @@ import io.agentscope.core.message.UserMessage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 
@@ -22,6 +25,7 @@ import java.util.List;
 public class AgentScopeChatAgent implements ChatAgent {
 
     private final ReActAgent videoAssistantAgent;
+    private final AgentScopeProperties properties;
 
     @Override
     public AgentReply chat(AgentRequest request) {
@@ -30,14 +34,25 @@ public class AgentScopeChatAgent implements ChatAgent {
                 .sessionId(String.valueOf(request.sessionId()))
                 .build();
 
-        Msg reply = videoAssistantAgent
-                .call(List.of(new UserMessage(buildPrompt(request))), context)
-                .block();
+        try {
+            Msg reply = videoAssistantAgent
+                    .call(List.of(new UserMessage(buildPrompt(request))), context)
+                    // 前端 axios 超时 20s，这里给出整体阻塞上限
+                    .block(properties.getTimeout().plusSeconds(2));
 
-        String text = reply == null || reply.getTextContent() == null
-                ? "" : reply.getTextContent();
-        String toolName = detectTool(request.content());
-        return new AgentReply(text, toolName != null, toolName);
+            String text = reply == null || reply.getTextContent() == null
+                    ? "" : reply.getTextContent();
+            if (!StringUtils.hasText(text)) {
+                throw new BizException(ResultCode.MODEL_UNAVAILABLE, "模型未返回有效回复，请重试");
+            }
+
+            String toolName = detectTool(request.content());
+            return new AgentReply(text, toolName != null, toolName);
+        } catch (BizException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw ModelErrorTranslator.translate(ex);
+        }
     }
 
     private String buildPrompt(AgentRequest request) {
