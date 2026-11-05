@@ -27,5 +27,7 @@ public class AgentScopeProperties {
     /** 模型调用最大尝试次数；MVP 默认不自动重试 */
     private int maxAttempts = 1;
     private int maxHistoryMessages = 20;
+    /** 工具确认挂起窗口；超时后确认接口返回 40900 */
+    private Duration confirmTimeout = Duration.ofMinutes(5);
     private String sysPrompt = "你是 AI Video Studio 的视频创作助手。";
 }

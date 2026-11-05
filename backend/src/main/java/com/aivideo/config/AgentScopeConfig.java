@@ -7,6 +7,10 @@ import io.agentscope.core.model.ExecutionConfig;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ModelCreationContext;
 import io.agentscope.core.model.ModelRegistry;
+import io.agentscope.core.permission.PermissionBehavior;
+import io.agentscope.core.permission.PermissionContextState;
+import io.agentscope.core.permission.PermissionMode;
+import io.agentscope.core.permission.PermissionRule;
 import io.agentscope.core.tool.Toolkit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +39,21 @@ public class AgentScopeConfig {
         Toolkit toolkit = new Toolkit();
         toolkit.registerTool(new VideoAssistantTools());
         return toolkit;
+    }
+
+    /**
+     * 演示用权限上下文：generateVideoClip 调用前必须由用户确认，其他工具直接放行。
+     *
+     * <p>默认 DEFAULT 模式在无规则时不会触发 ASK，因此这里用 BYPASS + 显式 ASK 规则。</p>
+     */
+    @Bean
+    public PermissionContextState toolConfirmPermissionContext() {
+        return PermissionContextState.builder()
+                .mode(PermissionMode.BYPASS)
+                .addAskRule("generateVideoClip",
+                        new PermissionRule("generateVideoClip", "",
+                                PermissionBehavior.ASK, "user"))
+                .build();
     }
 
     @Bean

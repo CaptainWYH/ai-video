@@ -1,5 +1,11 @@
 import { http } from '@/api/request';
-import type { ChatMessage, ChatSession, SendMessagePayload } from '@/types/chat';
+import type {
+  ChatMessage,
+  ChatSession,
+  ConfirmToolCallPayload,
+  SendMessagePayload,
+  ToolConfirmResponse,
+} from '@/types/chat';
 import type { PageResult } from '@/types/common';
 
 export const chatApi = {
@@ -30,6 +36,14 @@ export const chatApi = {
   sendMessage(payload: SendMessagePayload) {
     return http<ChatMessage>({
       url: '/chat/messages',
+      method: 'POST',
+      data: payload,
+    });
+  },
+
+  confirmToolCall(messageId: number, payload: ConfirmToolCallPayload) {
+    return http<ToolConfirmResponse>({
+      url: `/chat/messages/${messageId}/confirm`,
       method: 'POST',
       data: payload,
     });

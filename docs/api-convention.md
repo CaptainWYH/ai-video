@@ -167,6 +167,7 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 | GET | `/sessions?page=1&size=20` | 会话分页列表 |
 | GET | `/sessions/{id}/messages?page=1&size=100` | 会话历史消息分页 |
 | POST | `/messages` | 发送消息（同步返回 + WS 推流） |
+| POST | `/messages/{id}/confirm` | 处理工具调用确认并恢复 Agent |
 
 #### POST `/sessions`
 
@@ -226,9 +227,58 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 }
 ```
 
-`messageType` 取值 `TEXT` / `VIDEO_CARD`；`videoIntent=true` 时前端展示视频占位卡片。首条消息会把会话标题更新为内容前 30 个字符。
+`messageType` 取值 `TEXT` / `VIDEO_CARD` / `TOOL_CONFIRM`；`videoIntent=true` 时前端展示视频占位卡片。首条消息会把会话标题更新为内容前 30 个字符。
+
+当真实 Agent 准备调用需要确认的工具（当前为 `generateVideoClip`）时，本轮不返回最终回复，而是同步返回一条 `TOOL_CONFIRM` 消息，并额外携带：
+
+```json
+{
+  "messageType": "TOOL_CONFIRM",
+  "videoIntent": false,
+  "toolName": "generateVideoClip",
+  "confirmationId": "9f1a…",
+  "replyId": "a2b3…",
+  "toolCalls": [
+    {
+      "id": "call_1",
+      "name": "generateVideoClip",
+      "input": { "prompt": "海边日落，镜头缓慢推进", "durationSeconds": 5 }
+    }
+  ],
+  "confirmStatus": "PENDING"
+}
+```
+
+此时通过 `chat.tool_confirm_required` 推送该卡片，**不发送** `chat.done`；前端以确认卡片结束本轮。
 
 模型调用失败时返回上表中的 `42900` / `50200` / `50300` / `50400`，且**不写入**用户消息与助手消息；请求与响应字段不因模型切换而变化。默认 Mock 模式不发起网络请求。
+
+#### POST `/messages/{id}/confirm`
+
+仅用于 `messageType=TOOL_CONFIRM` 且 `confirmStatus=PENDING` 的消息，`id` 为确认卡片的消息 ID。
+
+```json
+{ "approved": true, "requestId": "a7c9d1e2-..." }
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `approved` | 是 | `true` 允许执行，`false` 拒绝 |
+| `requestId` | 否 | 前端生成，最长 64 字符，用于关联 WS 事件 |
+
+返回：
+
+```json
+{
+  "confirmMessage": { "id": 103, "messageType": "TOOL_CONFIRM", "confirmStatus": "APPROVED" },
+  "replyMessage": { "id": 104, "messageType": "TEXT", "content": "..." }
+}
+```
+
+- 确认卡片字段：`confirmationId`、`replyId`、`toolCalls`（`id/name/input`）、`confirmStatus`（`PENDING` / `APPROVED` / `DENIED` / `EXPIRED` / `FAILED`）。
+- Agent 恢复后如果再次要求确认，`replyMessage.messageType=TOOL_CONFIRM`，并推送新的 `chat.tool_confirm_required`。
+- 错误码：消息不存在或跨用户 `40400`；非确认消息 `40000`；已处理、重复确认、挂起超时（默认 5 分钟）或同会话已有待确认 `40900`。
+- 请求只提交 `approved`，工具参数以服务端挂起记录为准，避免前端篡改。
 
 ### 3.3 视频任务 `/api/v1/video`
 
@@ -330,6 +380,8 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 | --- | --- | --- |
 | `chat.chunk` | 助手回复分片 | `sessionId`、`requestId`、`delta` |
 | `chat.done` | 回复完成 | `sessionId`、`requestId`、`message` |
+| `chat.tool_confirm_required` | 工具调用等待用户确认 | `sessionId`、`requestId`、`message`（`TOOL_CONFIRM` 卡片） |
+| `chat.tool_confirm_result` | 工具确认状态更新 | `sessionId`、`requestId`、`messageId`、`confirmationId`、`replyId`、`status`、`toolCalls` |
 | `video.progress` | 视频任务状态更新 | `taskId`、`status`、`progress`、`resultUrl` |
 | `pong` | 心跳响应 | `null` |
 
@@ -338,6 +390,8 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 - 当前 `chat.chunk` 是完整回复的切片（每片 6 个字符，间隔 40ms），不是模型 token 级流式；Mock 与真实 DeepSeek 模式均如此。
 - 若客户端离线，后端直接跳过推送；REST 接口仍会返回完整消息。
 - 前端在收到 `chat.done` 后结束占位气泡；若 5 秒内未收到，则以 POST 返回结果兜底。
+- 工具确认挂起时只发送 `chat.tool_confirm_required`，不发送 `chat.done`；用户确认后如果 Agent 完成，仍以 `chat.chunk` + `chat.done` 推送最终回复，并先发送 `chat.tool_confirm_result` 更新卡片状态。
+- 挂起状态保存在单实例内存中，后端重启或多实例切换后确认会返回 `40900`；刷新页面可从历史消息恢复卡片展示。
 
 ## 5. 接口登记流程
 

@@ -5,5 +5,16 @@ package com.aivideo.agent;
  */
 public interface ChatAgent {
 
-    AgentReply chat(AgentRequest request);
+    AgentOutcome chat(AgentRequest request);
+
+    /**
+     * 恢复因工具确认而暂停的 Agent。
+     */
+    AgentOutcome confirm(AgentConfirmRequest request);
+
+    /**
+     * 清理某会话的 Agent 状态，用于落库失败后避免残留 pendding 工具调用。
+     */
+    default void reset(Long userId, Long sessionId) {
+    }
 }

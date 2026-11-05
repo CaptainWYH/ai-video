@@ -1,4 +1,4 @@
-# AI Video Studio
+# AI Video Studio （功能陆续完善中）
 
 面向 PC 端的 AI 视频创作工具骨架。以「对话 → 分镜 → 视频任务」为主线，前后端分离，当前阶段聚焦工程结构、认证闭环、对话闭环与视频任务占位流程。
 
@@ -190,3 +190,8 @@ cp .env.example .env
 ## 免责声明
 
 仓库内所有视频结果 URL 均为 `https://example.com/...` 占位地址，不包含真实生成内容。
+
+### 展示截图
+![img.png](img.png)
+![img_1.png](img_1.png)
+![img_2.png](img_2.png)

@@ -74,9 +74,10 @@ mvn test
 - 统一响应 `Result<T>`（`code/message/data`，成功 `code=0`），分页 `Result<PageResult<T>>`；业务错误抛 `BizException`，由 `GlobalExceptionHandler` 转换。HTTP 状态与业务 code 对应，code 定义见 `common/ResultCode.java`。
 - 认证：access + refresh 双 JWT；refresh 刷新时旋转并消费旧 `jti`；`TokenStore` 有 Redis 白名单/黑名单与内存两种实现。JWT 过滤器写入 `UserPrincipal`，业务层用 `SecurityUtils.currentUserId()`。
 - 公开路径仅注册、登录、刷新、`/ws/**`、Swagger、`/error`；其余接口必须登录。
-- 对话链路：`ChatServiceImpl.sendMessage` 校验会话归属 → 加载历史 → **事务外** `AgentFactory` 调用 `ChatAgent` → 单事务保存用户消息/助手消息并更新会话标题/时间 → 同步返回并异步调用 `ChatPushService` 推流。`ChatService` 不直接依赖具体模型。
+- 对话链路：`ChatServiceImpl.sendMessage` 校验会话归属 → 加载历史 → **事务外** `AgentFactory` 调用 `ChatAgent`，返回 `AgentOutcome` → `Completed` 时单事务保存用户消息/助手消息并更新会话标题/时间 → 同步返回并异步调用 `ChatPushService` 推流；`AwaitingConfirmation` 时写入用户消息 + `TOOL_CONFIRM` 卡片并挂起，不推 `chat.done`。`ChatService` 不直接依赖具体模型。
+- 工具确认：`AgentScopeChatAgent` 消费 `streamEvents` 事件流，权限上下文为 `BYPASS + addAskRule("generateVideoClip", ASK)`（默认 `DEFAULT` 模式会绕过权限引擎，不触发 `RequireUserConfirmEvent`）；恢复时用 `Msg.METADATA_CONFIRM_RESULTS` + 原 `ToolUseBlock` 再次 `streamEvents`。`POST /chat/messages/{id}/confirm` 由 `PendingConfirmationRegistry` 原子 claim 防重复，挂起记录是单实例内存（TTL 由 `AGENTSCOPE_CONFIRM_TIMEOUT` 控制），卡片 UI 状态存 `chat_messages.metadata`。
 - Agent 选择由配置驱动：`MockModelProvider`（默认）或 `AgentScopeChatAgent` + `ReActAgent`；真实模型通过 `ModelRegistry.resolve("deepseek:<model>")` 交给 `agentscope-extensions-model-openai` 的 DeepSeek provider；工具在 `AgentScopeConfig` 注册。
-- WebSocket 事件为 `{type, data}`：`chat.chunk`、`chat.done`、`video.progress`、`pong`。握手通过 query token 鉴权。
+- WebSocket 事件为 `{type, data}`：`chat.chunk`、`chat.done`、`chat.tool_confirm_required`、`chat.tool_confirm_result`、`video.progress`、`pong`。握手通过 query token 鉴权。
 - 视频任务：`VideoGenerationServiceImpl` 创建 `PENDING` 记录后由 `videoTaskExecutor` 模拟推进到 `SUCCESS`，结果 URL 是 `https://example.com/mock-video/{id}.mp4`。
 - 主键使用数据库自增（避免 JS 精度问题）；所有表有 `deleted` 逻辑删除字段。
 - MyBatis-Plus 3.5.9 的分页依赖独立的 `mybatis-plus-jsqlparser`，不要误删。
@@ -109,7 +110,9 @@ mvn test
 ## 已知限制
 
 - WebSocket 的流式输出是完整回复切片，不是模型 token 级流式（Mock 与 DeepSeek 模式相同）。
-- 意图识别仍基于关键词（Mock 与真实模式相同）；后续需从 AgentScope 工具事件提取 `toolName`。
+- 意图识别：真实模式优先从 AgentScope 工具事件提取 `toolName`，缺失时回退关键词；Mock 模式仍只用关键词。
 - 模型调用失败时不写入用户/助手消息，暂无请求幂等。
 - 视频任务状态由进程内线程池推进，重启后未完成任务不会恢复。
+- 工具确认挂起记录仅存于单实例内存，重启或多实例切换后确认返回 `40900`；同一会话同时只允许一个待确认。
+- 确认接口同步执行 Agent 恢复（预算 `AGENTSCOPE_TIMEOUT + 2s`），真实长耗时工具需改为异步任务。
 - MinIO/S3、验证码、限流、真实任务队列尚未实现。

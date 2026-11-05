@@ -2,7 +2,13 @@ import { useEffect } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { tokenStorage } from '@/utils/tokenStorage';
 import { getWsUrl } from '@/utils/ws';
-import type { ChatChunkData, ChatDoneData, WsEvent } from '@/types/chat';
+import type {
+  ChatChunkData,
+  ChatDoneData,
+  ToolConfirmRequiredData,
+  ToolConfirmResultData,
+  WsEvent,
+} from '@/types/chat';
 
 const MAX_RETRY = 6;
 
@@ -54,6 +60,12 @@ export function useChatSocket(enabled = true): void {
             useChatStore
               .getState()
               .finishStreaming(data.sessionId, data.requestId, data.message);
+          } else if (payload.type === 'chat.tool_confirm_required') {
+            const data = payload.data as ToolConfirmRequiredData;
+            useChatStore.getState().handleToolConfirmRequired(data);
+          } else if (payload.type === 'chat.tool_confirm_result') {
+            const data = payload.data as ToolConfirmResultData;
+            useChatStore.getState().handleToolConfirmResult(data);
           }
         } catch {
           // 忽略非 JSON 消息（例如 pong）

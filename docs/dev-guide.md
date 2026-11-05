@@ -192,6 +192,7 @@ mvn test                                             # 测试（当前暂无用�
 | `DEEPSEEK_BASE_URL` | DeepSeek / 兼容网关地址 | `https://api.deepseek.com` |
 | `AGENTSCOPE_TIMEOUT` | 单次模型调用超时 | `PT15S`（需小于前端 20s） |
 | `AGENTSCOPE_MAX_ITERS` / `AGENTSCOPE_MAX_ATTEMPTS` | ReAct 迭代上限 / 模型调用尝试次数 | `3` / `1` |
+| `AGENTSCOPE_CONFIRM_TIMEOUT` | 工具确认挂起有效期 | ISO-8601，默认 `PT5M` |
 
 完整清单见 [`backend/.env.example`](../backend/.env.example)。不要提交真实 `.env` 或密钥；`.gitignore` 已忽略 `.env`。
 
@@ -208,12 +209,24 @@ mvn test                                             # 测试（当前暂无用�
 - 模型调用的超时/限流/鉴权失败/5xx 分别映射为业务码 `50400` / `42900` / `50200` / `50300`（见 `docs/api-convention.md`）。鉴权失败返回 502 而非 401，不会触发前端重新登录。
 - 模型调用发生在数据库事务之外；调用失败时不写入用户/助手消息。
 
+### 4.3.1 工具调用确认演示
+
+真实模式默认对 `generateVideoClip` 开启「调用前用户确认」：
+
+1. 启动后端（`AGENTSCOPE_ENABLED=true` + `DEEPSEEK_API_KEY`）和前端。
+2. 在 `/create` 输入含视频意图的内容，例如「帮我生成一个海边日落的视频，5 秒，电影感，镜头缓慢推进」。
+3. 模型准备调用 `generateVideoClip` 时，消息流中出现 `TOOL_CONFIRM` 卡片，列出工具名与参数，本轮不返回最终回复。
+4. 点「允许执行」或「拒绝」，卡片状态更新，随后出现最终助手回复；点「允许」时当前工具仍是占位实现，不会真正生成视频。
+5. 卡片 `PENDING` 超过 `AGENTSCOPE_CONFIRM_TIMEOUT` 后确认会返回 `40900` 并标记失效；刷新页面可恢复卡片展示，后端重启后挂起记录丢失。
+
+确认参数只提交 `approved`，服务端以挂起记录中的原始 `toolCalls` 为准。挂起状态保存在单实例内存，多实例部署需改用共享存储。
+
 真实模式下仍待完善：
 
-- 从 AgentScope 工具调用事件提取 `toolName`（当前仍为关键词识别）。
 - 使用 AgentScope 的会话/记忆机制替代手动拼接历史。
 - token 级真流式（当前仍是完整回复切片推送）。
 - 自动重试/退避/熔断（当前 `AGENTSCOPE_MAX_ATTEMPTS` 默认 1）。
+- 工具确认为单机内存实现，重启/多实例失效。
 
 ### 4.4 MinIO
 

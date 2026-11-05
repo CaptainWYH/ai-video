@@ -2,8 +2,10 @@ package com.aivideo.chat.controller;
 
 import com.aivideo.chat.dto.ChatMessageResponse;
 import com.aivideo.chat.dto.ChatSessionResponse;
+import com.aivideo.chat.dto.ConfirmToolCallRequest;
 import com.aivideo.chat.dto.CreateSessionRequest;
 import com.aivideo.chat.dto.SendMessageRequest;
+import com.aivideo.chat.dto.ToolConfirmResponse;
 import com.aivideo.chat.service.ChatService;
 import com.aivideo.common.PageResult;
 import com.aivideo.common.Result;
@@ -58,5 +60,14 @@ public class ChatController {
     @PostMapping("/messages")
     public Result<ChatMessageResponse> sendMessage(@Valid @RequestBody SendMessageRequest request) {
         return Result.ok(chatService.sendMessage(SecurityUtils.currentUserId(), request));
+    }
+
+    @Operation(summary = "处理工具调用确认并恢复 Agent")
+    @PostMapping("/messages/{id}/confirm")
+    public Result<ToolConfirmResponse> confirmToolCall(
+            @PathVariable("id") Long messageId,
+            @Valid @RequestBody ConfirmToolCallRequest request) {
+        return Result.ok(chatService.confirmToolCall(
+                SecurityUtils.currentUserId(), messageId, request));
     }
 }

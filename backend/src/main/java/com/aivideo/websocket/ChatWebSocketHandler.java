@@ -31,8 +31,13 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
+        log.info("[WS 接收] userId={}, sessionId={}, payload={}",
+                session.getAttributes().get("userId"), session.getId(), message.getPayload());
         if ("ping".equalsIgnoreCase(message.getPayload())) {
-            session.sendMessage(new TextMessage("{\"type\":\"pong\"}"));
+            String pong = "{\"type\":\"pong\"}";
+            session.sendMessage(new TextMessage(pong));
+            log.info("[WS 推送] userId={}, sessionId={}, payload={}",
+                    session.getAttributes().get("userId"), session.getId(), pong);
         }
     }
 

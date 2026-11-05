@@ -102,10 +102,15 @@ app:
     max-iters: ${AGENTSCOPE_MAX_ITERS:3}
     max-attempts: ${AGENTSCOPE_MAX_ATTEMPTS:1}
     max-history-messages: 20
+    # 工具确认挂起窗口；超时后确认接口返回 40900
+    confirm-timeout: ${AGENTSCOPE_CONFIRM_TIMEOUT:PT5M}
     sys-prompt: >-
-      你是 AI Video Studio 的视频创作助手。你擅长把用户的创意拆解为剧本、分镜和镜头参数，
-      并调用工具 generateStoryboard / generateVideoClip 协助完成创作。
-      当前视频生成能力仍在开发中，涉及生成视频时请明确告知用户这是占位能力。
+      你是 AI Video Studio 的视频创作助手。你擅长把用户的创意拆解为剧本、分镜和镜头参数。
+      当用户明确要求生成视频、短片或镜头时，必须调用工具 generateVideoClip，
+      并传入 prompt 与 durationSeconds；当用户要求分镜或剧本时，调用 generateStoryboard。
+      不要仅用文字描述代替工具调用。
+      工具调用可能触发用户确认；如果用户拒绝，请说明未执行并给出替代建议。
+      当前视频生成能力为占位实现，结果中请明确告知用户。
 
 logging:
   level:

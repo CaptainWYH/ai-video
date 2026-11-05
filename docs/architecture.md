@@ -199,21 +199,46 @@ sequenceDiagram
 
 `ChatService.sendMessage` 的核心步骤：
 
-1. 校验会话归属（会话必须属于当前用户）。
-2. 加载最近 `app.agentscope.max-history-messages` 条历史消息。
-3. 在**事务外**通过 `AgentFactory.getAgent().chat(AgentRequest)` 获取 `AgentReply`，避免模型网络调用占用数据库连接。
-4. 在同一个短事务中保存用户消息、助手消息（`role=ASSISTANT`，可带 `videoIntent` / `toolName`）并更新会话。
+1. 校验会话归属（会话必须属于当前用户）；同一会话存在待确认的工具调用时直接返回 `40900`。
+2. 加载最近 `app.agentscope.max-history-messages` 条历史消息（过滤 `TOOL_CONFIRM` 卡片）。
+3. 在**事务外**通过 `AgentFactory.getAgent().chat(AgentRequest)` 获取 `AgentOutcome`，避免模型网络调用占用数据库连接。
+4. 按结果分支：
+   - `Completed`：在同一短事务中保存用户消息、助手消息（`role=ASSISTANT`，可带 `videoIntent` / `toolName`）并更新会话；事务提交后通过 `ChatPushService` 异步推送模拟分片，同时同步返回完整消息。
+   - `AwaitingConfirmation`：短事务写入用户消息 + `messageType=TOOL_CONFIRM` 的助手消息（`metadata` 保存 `confirmationId` / `replyId` / `toolCalls` / `confirmStatus=PENDING` / `toolName`），事务外注册挂起记录并推送 `chat.tool_confirm_required`，**不推送** `chat.done`。
 5. 更新会话 `lastMessageAt`；首条消息时用前 30 个字符生成标题。
-6. 事务提交后通过 `ChatPushService` 异步推送模拟分片，同时同步返回完整消息。
 
 模型调用失败时不写入任何消息，与前端移除乐观消息的行为一致。
+
+工具确认与恢复：
+
+```text
+POST /chat/messages/{id}/confirm { approved }
+  → getOwnedMessage（跨用户 40400）
+  → 校验 messageType=TOOL_CONFIRM 且 confirmStatus=PENDING
+  → PendingConfirmationRegistry.claim（原子领取，防重复点击）
+  → AgentScopeChatAgent.confirm（同一 RuntimeContext 再次 streamEvents）
+  → Completed：更新原卡片状态 + 插入最终助手消息；推送 chat.tool_confirm_result + chat.chunk/chat.done
+  → AwaitingConfirmation：更新原卡片 + 插入新的 TOOL_CONFIRM 卡片并再次挂起
+```
+
+- 挂起记录保存在 `PendingConfirmationRegistry`（单实例 `ConcurrentHashMap`，默认 TTL 5 分钟，`AGENTSCOPE_CONFIRM_TIMEOUT` 可调）；卡片 UI 状态持久化在 `chat_messages.metadata`，刷新后可恢复展示。
+- 前端只提交 `approved`，工具参数以服务端挂起记录为准，防止篡改。
+- 确认恢复期间执行异常时，尽力把卡片标记为 `FAILED` 并调用 `agent.reset(userId, sessionId)` 清理槽位状态。
+
+真实 Agent 的事件流：
+
+- `AgentScopeChatAgent` 用 `streamEvents(msgs, RuntimeContext(userId, sessionId))` 收集事件，而非阻塞 `call()`。
+- 工具确认由权限上下文触发：`PermissionMode.BYPASS` + `addAskRule("generateVideoClip", ASK)`，并通过 `replacePermissionContext(userId, sessionId, ctx)` 按槽位安装。默认 `PermissionMode.DEFAULT` 的 `isTrivial()` 会绕过权限引擎，不会产生 `RequireUserConfirmEvent`。
+- 恢复时使用 `UserMessage.metadata = { Msg.METADATA_CONFIRM_RESULTS: [ConfirmResult(approved, toolUseBlock)] }`，`ToolUseBlock` 必须用原 `id/name/input` 重建；恢复调用也必须走 `streamEvents`。
+- 事件流要消费到结束：取最后一个 `AgentResultEvent` 的文本，若存在 `RequireUserConfirmEvent` 则返回 `AwaitingConfirmation`（支持恢复后再次 ASK）。
+- 工具名优先从 `ToolCallStartEvent` / `ToolCallEndEvent` 提取，取不到时回退关键词识别；确认恢复后的回复不再设置 `videoIntent`，避免重复创建 `VideoTask`。
 
 Agent 层解耦：
 
 ```text
 ChatService
    └── AgentFactory
-         └── ChatAgent（唯一实现）
+         └── ChatAgent（按配置二选一）
                ├── ProviderChatAgent → MockModelProvider（默认，无网络）
                └── AgentScopeChatAgent → ReActAgent + Toolkit（AGENTSCOPE_ENABLED=true）
                                            └── ModelRegistry.resolve("deepseek:<model>") → DeepSeek provider
@@ -225,7 +250,7 @@ ChatService
 - 已注册两个占位工具：
   - `generateStoryboard`：生成分镜占位结果。
   - `generateVideoClip`：生成视频片段占位结果。
-- Mock 与真实模式目前都通过关键词识别意图（分镜 / 视频 / 镜头）；后续应从 AgentScope 的工具调用事件中提取。
+- 真实模式优先从 AgentScope 的工具调用事件提取 `toolName`，事件缺失时才回退关键词识别（分镜 / 视频 / 镜头）；Mock 模式仍为关键词识别。
 
 ### 3.4 WebSocket 协议
 
@@ -248,6 +273,8 @@ ChatService
 | --- | --- | --- |
 | `chat.chunk` | 助手回复流式分片 | `sessionId`、`requestId`、`delta` |
 | `chat.done` | 一次回复结束 | `sessionId`、`requestId`、`message`（完整 `ChatMessageResponse`） |
+| `chat.tool_confirm_required` | 工具调用等待用户确认 | `sessionId`、`requestId`、`message`（`TOOL_CONFIRM` 卡片） |
+| `chat.tool_confirm_result` | 确认状态更新 | `sessionId`、`requestId`、`messageId`、`confirmationId`、`replyId`、`status`、`toolCalls` |
 | `video.progress` | 视频任务状态变化 | `taskId`、`status`、`progress`、`resultUrl` |
 | `pong` | 客户端发送 `ping` 后 | 无 |
 
@@ -283,7 +310,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | `users` | `username`、`email`、`password_hash`、`nickname`、`avatar_url`、`status` | 用户名与邮箱唯一 |
 | `chat_sessions` | `user_id`、`title`、`last_message_at` | 会话归属用户 |
-| `chat_messages` | `session_id`、`role`、`content`、`message_type`、`metadata` | `metadata` 保存 `videoIntent` / `toolName` |
+| `chat_messages` | `session_id`、`role`、`content`、`message_type`、`metadata` | `metadata` 保存 `videoIntent` / `toolName`；`TOOL_CONFIRM` 卡片额外保存 `confirmationId` / `replyId` / `toolCalls` / `confirmStatus` |
 | `projects` | `user_id`、`name`、`description`、`script`、`storyboard` | 分镜暂存为 JSON 字符串 |
 | `video_tasks` | `user_id`、`project_id`、`prompt`、`params`、`status`、`progress`、`result_url` | 参数为 JSON 字符串 |
 
@@ -307,5 +334,7 @@ stateDiagram-v2
 - 意图识别仍基于关键词，真实工具调用结果尚未回传。
 - 真实模型调用在事务外执行；失败时用户与助手消息均不落库，暂不做请求幂等。
 - 视频任务状态在内存异步线程中推进；应用重启后未完成任务不会自动恢复。
+- 工具确认的挂起状态仅存在于单实例内存（`PendingConfirmationRegistry`），后端重启、多实例或负载均衡到其他节点后确认会返回 `40900`；生产需改用 Redis 或共享 AgentState store + 粘性会话。
+- 确认接口同步执行 Agent 恢复调用，耗时受 `AGENTSCOPE_TIMEOUT` 约束；真实长耗时工具需改为异步任务。
 - 刷新 token 的白名单依赖 Redis；`memory` 模式不支持多实例。
 - 未实现验证码、限流、登录失败锁定、文件上传与前端项目管理页面。

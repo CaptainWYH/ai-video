@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import GenerationCard from '@/components/create/GenerationCard';
 import MessageBubble from '@/components/create/MessageBubble';
 import PromptComposer from '@/components/create/PromptComposer';
+import ToolConfirmCard from '@/components/create/ToolConfirmCard';
 import WorkspaceSidebar from '@/components/create/WorkspaceSidebar';
 import WorkspaceTopBar from '@/components/create/WorkspaceTopBar';
 import { useChatSocket } from '@/hooks/useChatSocket';
@@ -46,10 +47,12 @@ export default function CreatePage() {
   const loadingMessages = useChatStore((state) => state.loadingMessages);
   const streaming = useChatStore((state) => state.streaming);
   const socketConnected = useChatStore((state) => state.socketConnected);
+  const confirmingMessageId = useChatStore((state) => state.confirmingMessageId);
   const loadSessions = useChatStore((state) => state.loadSessions);
   const createSession = useChatStore((state) => state.createSession);
   const selectSession = useChatStore((state) => state.selectSession);
   const sendMessage = useChatStore((state) => state.sendMessage);
+  const confirmToolCall = useChatStore((state) => state.confirmToolCall);
   const resetChat = useChatStore((state) => state.reset);
 
   const prompt = useDraftStore((state) => state.prompt);
@@ -158,6 +161,10 @@ export default function CreatePage() {
           return;
         }
         clearPrompt();
+        if (reply.messageType === 'TOOL_CONFIRM') {
+          // 等待用户在消息流内完成确认，不再自动创建视频任务。
+          return;
+        }
         if (reply.videoIntent) {
           await startVideoTask(text, nextParams);
         }
@@ -168,6 +175,17 @@ export default function CreatePage() {
       }
     },
     [sendMessage, clearPrompt, startVideoTask],
+  );
+
+  const handleConfirm = useCallback(
+    async (messageId: number, approved: boolean) => {
+      try {
+        await confirmToolCall(messageId, approved);
+      } catch (error) {
+        message.error(getErrorMessage(error));
+      }
+    },
+    [confirmToolCall],
   );
 
   const handleGenerate = useCallback(() => {
@@ -328,9 +346,18 @@ export default function CreatePage() {
               </div>
             ) : (
               <div className="thread-messages">
-                {messages.map((item) => (
-                  <MessageBubble key={item.id} message={item} />
-                ))}
+                {messages.map((item) =>
+                  item.messageType === 'TOOL_CONFIRM' ? (
+                    <ToolConfirmCard
+                      key={item.id}
+                      message={item}
+                      busy={confirmingMessageId === item.id}
+                      onConfirm={(approved) => void handleConfirm(item.id, approved)}
+                    />
+                  ) : (
+                    <MessageBubble key={item.id} message={item} />
+                  ),
+                )}
                 {streamingMessage ? (
                   <MessageBubble message={streamingMessage} streaming />
                 ) : null}

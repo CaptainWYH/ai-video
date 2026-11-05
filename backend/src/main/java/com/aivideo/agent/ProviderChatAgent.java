@@ -1,5 +1,6 @@
 package com.aivideo.agent;
 
+import com.aivideo.common.BizException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -15,7 +16,12 @@ public class ProviderChatAgent implements ChatAgent {
     private final ModelProvider modelProvider;
 
     @Override
-    public AgentReply chat(AgentRequest request) {
-        return modelProvider.chat(request);
+    public AgentOutcome chat(AgentRequest request) {
+        return new AgentOutcome.Completed(modelProvider.chat(request));
+    }
+
+    @Override
+    public AgentOutcome confirm(AgentConfirmRequest request) {
+        throw BizException.badRequest("当前 Mock 模式不支持工具确认");
     }
 }

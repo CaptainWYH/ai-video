@@ -1,8 +1,22 @@
 import { create } from 'zustand';
 import { chatApi } from '@/api/chat';
-import type { ChatMessage, ChatSession, StreamingReply } from '@/types/chat';
+import type {
+  ChatMessage,
+  ChatSession,
+  StreamingReply,
+  ToolConfirmRequiredData,
+  ToolConfirmResultData,
+} from '@/types/chat';
 
 const fallbackTimers = new Map<string, number>();
+
+function clearFallbackTimer(requestId: string) {
+  const timer = fallbackTimers.get(requestId);
+  if (timer) {
+    window.clearTimeout(timer);
+    fallbackTimers.delete(requestId);
+  }
+}
 
 interface ChatState {
   sessions: ChatSession[];
@@ -12,6 +26,7 @@ interface ChatState {
   loadingMessages: boolean;
   streaming: StreamingReply | null;
   socketConnected: boolean;
+  confirmingMessageId: number | null;
 
   setSocketConnected: (connected: boolean) => void;
   loadSessions: (autoSelect?: boolean) => Promise<void>;
@@ -20,6 +35,10 @@ interface ChatState {
   sendMessage: (content: string) => Promise<ChatMessage | null>;
   appendChunk: (sessionId: number, requestId: string, delta: string) => void;
   finishStreaming: (sessionId: number, requestId: string, reply: ChatMessage) => void;
+  upsertMessage: (message: ChatMessage) => void;
+  handleToolConfirmRequired: (data: ToolConfirmRequiredData) => void;
+  handleToolConfirmResult: (data: ToolConfirmResultData) => void;
+  confirmToolCall: (messageId: number, approved: boolean) => Promise<ChatMessage | null>;
   reset: () => void;
 }
 
@@ -31,6 +50,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   loadingMessages: false,
   streaming: null,
   socketConnected: false,
+  confirmingMessageId: null,
 
   setSocketConnected: (connected) => set({ socketConnected: connected }),
 
@@ -56,6 +76,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       activeSessionId: session.id,
       messages: [],
       streaming: null,
+      confirmingMessageId: null,
     }));
     return session;
   },
@@ -66,6 +87,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       messages: [],
       loadingMessages: true,
       streaming: null,
+      confirmingMessageId: null,
     });
     try {
       const result = await chatApi.listMessages(sessionId);
@@ -114,6 +136,18 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         requestId,
       });
 
+      if (reply.messageType === 'TOOL_CONFIRM') {
+        // 工具确认是本轮终点：立即结束占位气泡，不设置 chat.done 兜底。
+        clearFallbackTimer(requestId);
+        get().handleToolConfirmRequired({
+          sessionId: targetSessionId,
+          requestId,
+          message: reply,
+        });
+        void get().loadSessions(false);
+        return reply;
+      }
+
       if (get().socketConnected) {
         // WebSocket 分片可能稍晚到达；5s 内未收到 chat.done 时用同步结果兜底
         const timer = window.setTimeout(() => {
@@ -154,11 +188,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   finishStreaming: (sessionId, requestId, reply) => {
-    const timer = fallbackTimers.get(requestId);
-    if (timer) {
-      window.clearTimeout(timer);
-      fallbackTimers.delete(requestId);
-    }
+    clearFallbackTimer(requestId);
 
     set((state) => {
       if (!state.streaming || state.streaming.requestId !== requestId) {
@@ -175,6 +205,95 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     });
   },
 
+  upsertMessage: (message) => {
+    set((state) => {
+      const index = state.messages.findIndex((item) => item.id === message.id);
+      if (index === -1) {
+        return { messages: [...state.messages, message] };
+      }
+      const messages = [...state.messages];
+      messages[index] = { ...messages[index], ...message };
+      return { messages };
+    });
+  },
+
+  handleToolConfirmRequired: (data) => {
+    if (get().activeSessionId !== data.sessionId) {
+      return;
+    }
+    clearFallbackTimer(data.requestId);
+    set((state) => {
+      const exists = state.messages.some((message) => message.id === data.message.id);
+      return {
+        streaming: null,
+        messages: exists
+          ? state.messages.map((message) =>
+              message.id === data.message.id ? { ...message, ...data.message } : message,
+            )
+          : [...state.messages, data.message],
+      };
+    });
+  },
+
+  handleToolConfirmResult: (data) => {
+    if (get().activeSessionId !== data.sessionId) {
+      return;
+    }
+    set((state) => ({
+      messages: state.messages.map((message) =>
+        message.id === data.messageId
+          ? {
+              ...message,
+              confirmationId: data.confirmationId,
+              confirmStatus: data.status,
+              toolCalls: data.toolCalls,
+            }
+          : message,
+      ),
+    }));
+  },
+
+  confirmToolCall: async (messageId, approved) => {
+    const message = get().messages.find((item) => item.id === messageId);
+    if (!message) {
+      return null;
+    }
+
+    set({ confirmingMessageId: messageId });
+    const requestId = crypto.randomUUID();
+    try {
+      const response = await chatApi.confirmToolCall(messageId, { approved, requestId });
+      get().upsertMessage(response.confirmMessage);
+
+      if (response.replyMessage.messageType === 'TOOL_CONFIRM') {
+        // Agent 恢复后再次调用工具，出现新的确认卡片。
+        get().handleToolConfirmRequired({
+          sessionId: response.replyMessage.sessionId,
+          requestId,
+          message: response.replyMessage,
+        });
+        void get().loadSessions(false);
+        return response.replyMessage;
+      }
+
+      get().upsertMessage(response.replyMessage);
+      set({ streaming: null });
+      void get().loadSessions(false);
+      return response.replyMessage;
+    } catch (error) {
+      set((state) => ({
+        messages: state.messages.map((item) =>
+          item.id === messageId && item.confirmStatus === 'PENDING'
+            ? { ...item, confirmStatus: 'FAILED' }
+            : item,
+        ),
+      }));
+      throw error;
+    } finally {
+      set({ confirmingMessageId: null });
+    }
+  },
+
   reset: () => {
     fallbackTimers.forEach((timer) => window.clearTimeout(timer));
     fallbackTimers.clear();
@@ -186,6 +305,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       loadingMessages: false,
       streaming: null,
       socketConnected: false,
+      confirmingMessageId: null,
     });
   },
 }));

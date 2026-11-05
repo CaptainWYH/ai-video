@@ -7,6 +7,14 @@ export interface ChatSession {
   createdAt: string;
 }
 
+export type ConfirmStatus = 'PENDING' | 'APPROVED' | 'DENIED' | 'EXPIRED' | 'FAILED';
+
+export interface ToolCallInfo {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
 export interface ChatMessage {
   id: number;
   sessionId: number;
@@ -15,6 +23,10 @@ export interface ChatMessage {
   messageType: string;
   videoIntent: boolean;
   toolName?: string | null;
+  confirmationId?: string | null;
+  replyId?: string | null;
+  toolCalls?: ToolCallInfo[] | null;
+  confirmStatus?: ConfirmStatus | null;
   createdAt: string;
 }
 
@@ -52,4 +64,30 @@ export interface StreamingReply {
   requestId: string;
   sessionId: number;
   content: string;
+}
+
+export interface ToolConfirmRequiredData {
+  sessionId: number;
+  requestId: string;
+  message: ChatMessage;
+}
+
+export interface ToolConfirmResultData {
+  sessionId: number;
+  requestId: string;
+  messageId: number;
+  confirmationId: string;
+  replyId: string;
+  status: ConfirmStatus;
+  toolCalls: ToolCallInfo[];
+}
+
+export interface ConfirmToolCallPayload {
+  approved: boolean;
+  requestId: string;
+}
+
+export interface ToolConfirmResponse {
+  confirmMessage: ChatMessage;
+  replyMessage: ChatMessage;
 }

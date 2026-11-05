@@ -1,5 +1,6 @@
 package com.aivideo.websocket;
 
+import com.aivideo.agent.AgentToolCall;
 import com.aivideo.chat.dto.ChatMessageResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -10,6 +11,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -60,6 +62,35 @@ public class ChatPushService {
     }
 
     /**
+     * 推送工具调用待确认事件。挂起时不发送 chat.done，前端以本事件结束本轮。
+     */
+    public void pushToolConfirmRequired(Long userId, Long sessionId,
+                                        String requestId, ChatMessageResponse message) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("sessionId", sessionId);
+        data.put("requestId", requestId);
+        data.put("message", message);
+        send(userId, "chat.tool_confirm_required", data);
+    }
+
+    /**
+     * 推送工具确认结果事件，用于同步确认卡片的最终状态。
+     */
+    public void pushToolConfirmResult(Long userId, Long sessionId, String requestId,
+                                      Long messageId, String confirmationId, String replyId,
+                                      String status, List<AgentToolCall> toolCalls) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("sessionId", sessionId);
+        data.put("requestId", requestId);
+        data.put("messageId", messageId);
+        data.put("confirmationId", confirmationId);
+        data.put("replyId", replyId);
+        data.put("status", status);
+        data.put("toolCalls", toolCalls);
+        send(userId, "chat.tool_confirm_result", data);
+    }
+
+    /**
      * 推送视频任务进度事件。
      */
     public void pushVideoProgress(Long userId, Long taskId, String status, int progress, String resultUrl) {
@@ -77,6 +108,7 @@ public class ChatPushService {
         event.put("data", data);
         try {
             String payload = objectMapper.writeValueAsString(event);
+            log.info("[WS 推送] userId={}, payload={}", userId, payload);
             for (WebSocketSession session : sessionRegistry.get(userId)) {
                 if (!session.isOpen()) {
                     continue;
