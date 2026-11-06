@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import { chatApi } from '@/api/chat';
 import type {
+  AgentTraceStep,
   ChatMessage,
+  ChatProgressData,
   ChatSession,
+  LiveTrace,
   StreamingReply,
   ToolConfirmRequiredData,
   ToolConfirmResultData,
@@ -27,6 +30,7 @@ interface ChatState {
   loadingSessions: boolean;
   loadingMessages: boolean;
   streaming: StreamingReply | null;
+  liveTrace: LiveTrace | null;
   socketConnected: boolean;
   confirmingMessageId: number | null;
   decidingPromptMessageId: number | null;
@@ -35,11 +39,9 @@ interface ChatState {
   loadSessions: (autoSelect?: boolean) => Promise<void>;
   createSession: () => Promise<ChatSession>;
   selectSession: (sessionId: number) => Promise<void>;
-  sendMessage: (
-    content: string,
-    params?: VideoGenerationParams,
-  ) => Promise<ChatMessage | null>;
+  sendMessage: (content: string, params?: VideoGenerationParams) => Promise<ChatMessage | null>;
   appendChunk: (sessionId: number, requestId: string, delta: string) => void;
+  handleProgress: (data: ChatProgressData) => void;
   finishStreaming: (sessionId: number, requestId: string, reply: ChatMessage) => void;
   upsertMessage: (message: ChatMessage) => void;
   handleToolConfirmRequired: (data: ToolConfirmRequiredData) => void;
@@ -57,6 +59,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   loadingSessions: false,
   loadingMessages: false,
   streaming: null,
+  liveTrace: null,
   socketConnected: false,
   confirmingMessageId: null,
   decidingPromptMessageId: null,
@@ -85,6 +88,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       activeSessionId: session.id,
       messages: [],
       streaming: null,
+      liveTrace: null,
       confirmingMessageId: null,
     }));
     return session;
@@ -96,6 +100,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       messages: [],
       loadingMessages: true,
       streaming: null,
+      liveTrace: null,
       confirmingMessageId: null,
     });
     try {
@@ -136,6 +141,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     set((state) => ({
       messages: [...state.messages, optimisticMessage],
       streaming: { requestId, sessionId: targetSessionId, content: '' },
+      liveTrace: { requestId, sessionId: targetSessionId, steps: [] },
     }));
 
     try {
@@ -174,6 +180,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       set((state) => ({
         messages: state.messages.filter((message) => message.id !== optimisticMessage.id),
         streaming: null,
+        liveTrace: state.liveTrace?.requestId === requestId ? null : state.liveTrace,
       }));
       throw error;
     }
@@ -197,18 +204,67 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     });
   },
 
+  handleProgress: (data) => {
+    set((state) => {
+      const live = state.liveTrace;
+      if (
+        !live ||
+        live.sessionId !== data.sessionId ||
+        live.requestId !== data.requestId ||
+        state.activeSessionId !== data.sessionId ||
+        !data.step?.id
+      ) {
+        return state;
+      }
+
+      const incoming = data.step;
+      const delta = data.delta ?? '';
+      const index = live.steps.findIndex((step) => step.id === incoming.id);
+      if (index === -1) {
+        const created: AgentTraceStep = { ...incoming };
+        if (delta) {
+          if (created.type === 'TOOL_RESULT') {
+            created.result = (created.result ?? '') + delta;
+          } else {
+            created.detail = (created.detail ?? '') + delta;
+          }
+        }
+        return { liveTrace: { ...live, steps: [...live.steps, created] } };
+      }
+
+      const current = live.steps[index];
+      const merged: AgentTraceStep = { ...current, ...incoming };
+      // 非增量帧带来的是聚合后的快照；增量帧只追加，不能覆盖已累积内容。
+      merged.detail = incoming.detail ?? current.detail;
+      merged.result = incoming.result ?? current.result;
+      if (delta) {
+        const type = incoming.type ?? current.type;
+        if (type === 'TOOL_RESULT') {
+          merged.result = (current.result ?? '') + delta;
+        } else {
+          merged.detail = (current.detail ?? '') + delta;
+        }
+      }
+      const steps = [...live.steps];
+      steps[index] = merged;
+      return { liveTrace: { ...live, steps } };
+    });
+  },
+
   finishStreaming: (sessionId, requestId, reply) => {
     clearFallbackTimer(requestId);
 
     set((state) => {
+      const clearTrace = state.liveTrace?.requestId === requestId ? { liveTrace: null } : {};
       if (!state.streaming || state.streaming.requestId !== requestId) {
-        return state;
+        return Object.keys(clearTrace).length ? { ...state, ...clearTrace } : state;
       }
       if (state.streaming.sessionId !== sessionId) {
-        return { ...state, streaming: null };
+        return { ...state, ...clearTrace, streaming: null };
       }
       const exists = state.messages.some((message) => message.id === reply.id);
       return {
+        ...clearTrace,
         streaming: null,
         messages: exists ? state.messages : [...state.messages, reply],
       };
@@ -236,6 +292,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       const exists = state.messages.some((message) => message.id === data.message.id);
       return {
         streaming: null,
+        liveTrace: state.liveTrace?.requestId === data.requestId ? null : state.liveTrace,
         messages: exists
           ? state.messages.map((message) =>
               message.id === data.message.id ? { ...message, ...data.message } : message,
@@ -292,8 +349,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       return null;
     }
 
-    set({ confirmingMessageId: messageId });
     const requestId = crypto.randomUUID();
+    set({
+      confirmingMessageId: messageId,
+      liveTrace: { requestId, sessionId: message.sessionId, steps: [] },
+    });
     try {
       const response = await chatApi.confirmToolCall(messageId, { approved, requestId });
       get().upsertMessage(response.confirmMessage);
@@ -323,7 +383,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       }));
       throw error;
     } finally {
-      set({ confirmingMessageId: null });
+      set((state) => ({
+        confirmingMessageId: null,
+        liveTrace: state.liveTrace?.requestId === requestId ? null : state.liveTrace,
+      }));
     }
   },
 
@@ -350,6 +413,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       loadingSessions: false,
       loadingMessages: false,
       streaming: null,
+      liveTrace: null,
       socketConnected: false,
       confirmingMessageId: null,
       decidingPromptMessageId: null,

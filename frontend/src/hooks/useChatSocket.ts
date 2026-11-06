@@ -5,6 +5,7 @@ import { getWsUrl } from '@/utils/ws';
 import type {
   ChatChunkData,
   ChatDoneData,
+  ChatProgressData,
   ToolConfirmRequiredData,
   ToolConfirmResultData,
   VideoProgressData,
@@ -58,9 +59,10 @@ export function useChatSocket(enabled = true): void {
             useChatStore.getState().appendChunk(data.sessionId, data.requestId, data.delta);
           } else if (payload.type === 'chat.done') {
             const data = payload.data as ChatDoneData;
-            useChatStore
-              .getState()
-              .finishStreaming(data.sessionId, data.requestId, data.message);
+            useChatStore.getState().finishStreaming(data.sessionId, data.requestId, data.message);
+          } else if (payload.type === 'chat.progress') {
+            const data = payload.data as ChatProgressData;
+            useChatStore.getState().handleProgress(data);
           } else if (payload.type === 'chat.tool_confirm_required') {
             const data = payload.data as ToolConfirmRequiredData;
             useChatStore.getState().handleToolConfirmRequired(data);

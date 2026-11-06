@@ -6,6 +6,7 @@ import GenerationCard from '@/components/create/GenerationCard';
 import MessageBubble from '@/components/create/MessageBubble';
 import PromptComposer from '@/components/create/PromptComposer';
 import PromptProposalCard from '@/components/create/PromptProposalCard';
+import ReasoningTrace from '@/components/create/ReasoningTrace';
 import ToolConfirmCard from '@/components/create/ToolConfirmCard';
 import WorkspaceSidebar from '@/components/create/WorkspaceSidebar';
 import WorkspaceTopBar from '@/components/create/WorkspaceTopBar';
@@ -40,6 +41,7 @@ export default function CreatePage() {
   const loadingSessions = useChatStore((state) => state.loadingSessions);
   const loadingMessages = useChatStore((state) => state.loadingMessages);
   const streaming = useChatStore((state) => state.streaming);
+  const liveTrace = useChatStore((state) => state.liveTrace);
   const socketConnected = useChatStore((state) => state.socketConnected);
   const confirmingMessageId = useChatStore((state) => state.confirmingMessageId);
   const decidingPromptMessageId = useChatStore((state) => state.decidingPromptMessageId);
@@ -102,8 +104,11 @@ export default function CreatePage() {
   }, [searchParams, openGate, navigate, setSearchParams]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, streaming?.content]);
+    const frame = requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [messages, streaming?.content, liveTrace]);
 
   const activeVideoTasks = messages
     .map((item) => item.videoTask)
@@ -121,16 +126,18 @@ export default function CreatePage() {
     const refresh = () => {
       void Promise.all(taskIds.map((taskId) => videoApi.getTask(taskId).catch(() => null))).then(
         (tasks) => {
-          tasks.filter((task): task is VideoTask => Boolean(task)).forEach((task) => {
-            handleVideoProgress({
-              taskId: task.id,
-              sessionId: activeSessionId,
-              status: task.status,
-              progress: task.progress,
-              resultUrl: task.resultUrl,
-              usage: task.usage,
+          tasks
+            .filter((task): task is VideoTask => Boolean(task))
+            .forEach((task) => {
+              handleVideoProgress({
+                taskId: task.id,
+                sessionId: activeSessionId,
+                status: task.status,
+                progress: task.progress,
+                resultUrl: task.resultUrl,
+                usage: task.usage,
+              });
             });
-          });
         },
       );
     };
@@ -248,8 +255,7 @@ export default function CreatePage() {
     navigate('/', { replace: true });
   };
 
-  const activeSession =
-    sessions.find((session) => session.id === activeSessionId) ?? null;
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
   const displayName = user?.nickname || user?.username || '创作者';
   const title = activeSession?.title || '新的创作';
   const subtitle = loggedIn
@@ -401,9 +407,12 @@ export default function CreatePage() {
                     ) : null}
                   </Fragment>
                 ))}
-                {streamingMessage ? (
-                  <MessageBubble message={streamingMessage} streaming />
+                {liveTrace && liveTrace.steps.length > 0 ? (
+                  <div className="trace-live-row">
+                    <ReasoningTrace steps={liveTrace.steps} live />
+                  </div>
                 ) : null}
+                {streamingMessage ? <MessageBubble message={streamingMessage} streaming /> : null}
                 <div ref={bottomRef} />
               </div>
             )}

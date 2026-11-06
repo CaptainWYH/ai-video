@@ -72,7 +72,7 @@ src/
 
 - `tokenStorage` 是 access / refresh token 的唯一来源，存于 `localStorage`。
 - `authStore` 只持久化用户信息；登录/注册成功后写入 token，`logout` 调用后端后清理 token。
-- `chatStore` 管理会话列表、当前会话、消息、流式占位、WebSocket 状态。
+- `chatStore` 管理会话列表、当前会话、消息、流式占位、实时推理轨迹与 WebSocket 状态。
 - 发送消息时：
 
 ```mermaid
@@ -94,6 +94,8 @@ sequenceDiagram
     S->>S: finishStreaming(requestId) 去重
     Note over S,API: 若 WS 未连接，POST 返回后立即结束占位<br/>若 WS 已连接但 5 秒未收到 done，则用同步结果兜底
 ```
+
+真实模式下，Agent 事件会先经 `AgentProgressTranslator` 翻译，再由 `ChatPushService` 以 `chat.progress` 同步推送；前端写入 `liveTrace`，在消息流中实时渲染「推理过程」卡片，`chat.done` 或失败后清理，最终消息以 `reasoningSteps` 持久化展示。
 
 ### 2.2 路由与鉴权
 
@@ -134,6 +136,7 @@ sequenceDiagram
 - 握手：`/ws/chat?token=<accessToken>`。
 - 25 秒发送一次 `ping`，断线后指数退避重连，最多 6 次。
 - 事件按 `type` 分发；`requestId` 用于将分片关联到具体一次发送。
+- `chat.progress` 按 `sessionId + requestId` 双校验写入 `liveTrace`；切会话、工具确认、完成或失败时清空，避免迟到事件串场。
 - 游客不建立 WebSocket；`useChatSocket(enabled)` 在未登录时直接返回并保持「离线兜底」状态。
 
 ## 3. 后端架构
@@ -228,6 +231,9 @@ POST /chat/messages/{id}/confirm { approved }
 真实 Agent 的事件流：
 
 - `AgentScopeChatAgent` 用 `streamEvents(msgs, RuntimeContext(userId, sessionId))` 收集事件，而非阻塞 `call()`。
+- 事件流逐条经 `AgentProgressTranslator` 翻译为推理步骤（状态 / 思考 / 工具调用 / 工具结果 / 错误），由 `AgentTraceCollector` 按步骤 ID 聚合、截断并实时推送 `chat.progress`；单事件翻译或推送失败只记录 `warn`，不影响最终回复。
+- 聚合结果在 `Completed` / `AwaitingConfirmation` / 失败时分别调用 `complete()` / `awaitingConfirmation()` / `fail()` 收尾，写入 `chat_messages.metadata.reasoningSteps`；Mock 模式没有事件，保持为空。
+- 模型流式由 `app.agentscope.stream`（`AGENTSCOPE_STREAM`，默认 `true`）控制，用于获取 thinking 增量；关闭后仍展示工具与状态级步骤。
 - 工具确认由权限上下文触发：`PermissionMode.BYPASS` + `addAskRule("generateVideoClip", ASK)`，并通过 `replacePermissionContext(userId, sessionId, ctx)` 按槽位安装。默认 `PermissionMode.DEFAULT` 的 `isTrivial()` 会绕过权限引擎，不会产生 `RequireUserConfirmEvent`。
 - 恢复时使用 `UserMessage.metadata = { Msg.METADATA_CONFIRM_RESULTS: [ConfirmResult(approved, toolUseBlock)] }`，`ToolUseBlock` 必须用原 `id/name/input` 重建；恢复调用也必须走 `streamEvents`。
 - 事件流要消费到结束：取最后一个 `AgentResultEvent` 的文本，若存在 `RequireUserConfirmEvent` 则返回 `AwaitingConfirmation`（支持恢复后再次 ASK）。
@@ -275,6 +281,7 @@ ChatService
 | type | 触发时机 | data 字段 |
 | --- | --- | --- |
 | `chat.chunk` | 助手回复流式分片 | `sessionId`、`requestId`、`delta` |
+| `chat.progress` | 真实 Agent 推理步骤更新 | `sessionId`、`requestId`、`step`（`AgentTraceStep`）、`delta`（思考/工具结果的增量，可选） |
 | `chat.done` | 一次回复结束 | `sessionId`、`requestId`、`message`（完整 `ChatMessageResponse`） |
 | `chat.tool_confirm_required` | 工具调用等待用户确认 | `sessionId`、`requestId`、`message`（`TOOL_CONFIRM` 卡片） |
 | `chat.tool_confirm_result` | 确认状态更新 | `sessionId`、`requestId`、`messageId`、`confirmationId`、`replyId`、`status`、`toolCalls` |
@@ -344,7 +351,9 @@ stateDiagram-v2
 
 ## 6. 已知边界
 
-- WebSocket 模拟流式输出是**发送完整消息后切片推送**，不是模型 token 级流式（真实 DeepSeek 模式同样如此）。
+- WebSocket 模拟流式输出是**发送完整消息后切片推送**，不是模型 token 级流式（真实 DeepSeek 模式同样如此）；但真实模式的推理步骤是事件级实时推送，正文仍走切片。
+- Mock 模式不产生推理步骤（`reasoningSteps` 为空，前端不渲染卡片）；真实模式最多保留 40 步，思考 8000 字符、工具输入/结果各 1500 字符、总计 12000 字符，超出后截断。
+- 实时进度帧不重放：断线期间丢失的 `chat.progress` 不会补发，最终以 `chat.done` / REST 返回的 `reasoningSteps` 为准。
 - Mock 意图识别仍基于关键词；真实 Agent 优先读取工具调用事件。
 - 真实模型调用在事务外执行；失败时用户与助手消息均不落库，暂不做请求幂等。
 - 视频队列目前由单实例数据库调度器承担；高并发时仍需升级到 Redis Stream / MQ 和分布式租约。

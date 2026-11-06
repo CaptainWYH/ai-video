@@ -69,7 +69,7 @@ public class AgentScopeConfig {
                 ModelCreationContext.builder()
                         .apiKey(properties.getApiKey().trim())
                         .baseUrl(properties.getBaseUrl().trim())
-                        .stream(false)
+                        .stream(properties.isStream())
                         .build());
 
         log.info("AgentScope 真实模型: model={}, baseUrl={}, timeout={}, apiKey=******",

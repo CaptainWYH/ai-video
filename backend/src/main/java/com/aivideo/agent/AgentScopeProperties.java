@@ -26,6 +26,8 @@ public class AgentScopeProperties {
     private int maxIters = 3;
     /** 模型调用最大尝试次数；MVP 默认不自动重试 */
     private int maxAttempts = 1;
+    /** 开启流式以获取 reasoning_content 等增量；关闭后仍展示工具/状态级步骤 */
+    private boolean stream = true;
     private int maxHistoryMessages = 20;
     /** 工具确认挂起窗口；超时后确认接口返回 40900 */
     private Duration confirmTimeout = Duration.ofMinutes(5);

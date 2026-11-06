@@ -66,7 +66,8 @@ public class AgentScopeChatAgent implements ChatAgent {
                 List.of(),
                 false,
                 false,
-                toolContext);
+                toolContext,
+                request.progressListener());
     }
 
     @Override
@@ -98,7 +99,8 @@ public class AgentScopeChatAgent implements ChatAgent {
                 request.toolCalls(),
                 request.approved(),
                 true,
-                toolContext);
+                toolContext,
+                request.progressListener());
     }
 
     @Override
@@ -112,11 +114,22 @@ public class AgentScopeChatAgent implements ChatAgent {
                                 List<AgentToolCall> submittedToolCalls,
                                 boolean approved,
                                 boolean fromConfirm,
-                                VideoToolExecutionContext toolContext) {
+                                VideoToolExecutionContext toolContext,
+                                AgentProgressListener progressListener) {
         try {
             // 必须消费到 onComplete，避免提前取消导致 AgentState 未保存。
+            // 同时逐事件翻译为推理步骤，实时推送给前端。
+            AgentProgressTranslator translator = new AgentProgressTranslator(progressListener);
             List<AgentEvent> events = videoAssistantAgent
                     .streamEvents(messages, context)
+                    .doOnNext(event -> {
+                        try {
+                            translator.accept(event);
+                        } catch (RuntimeException ex) {
+                            log.warn("Agent 推理事件翻译失败: type={}, error={}",
+                                    event == null ? null : event.getType(), ex.getMessage());
+                        }
+                    })
                     .collectList()
                     .block(properties.getTimeout().plusSeconds(2));
 

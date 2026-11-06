@@ -8,6 +8,8 @@ import com.aivideo.agent.AgentReply;
 import com.aivideo.agent.AgentRequest;
 import com.aivideo.agent.AgentScopeProperties;
 import com.aivideo.agent.AgentToolCall;
+import com.aivideo.agent.AgentTraceCollector;
+import com.aivideo.agent.AgentTraceStep;
 import com.aivideo.agent.ModelErrorTranslator;
 import com.aivideo.agent.PendingConfirmation;
 import com.aivideo.agent.PendingConfirmationRegistry;
@@ -127,23 +129,37 @@ public class ChatServiceImpl implements ChatService {
         }
 
         List<AgentMessage> history = loadHistory(session.getId());
+        String requestId = resolveRequestId(request.getRequestId());
+        AgentTraceCollector collector = new AgentTraceCollector(
+                event -> chatPushService.pushAgentProgress(
+                        userId, session.getId(), requestId, event));
 
         // 模型调用在事务外，避免真实网络请求长时间占用数据库连接。
-        AgentOutcome outcome = agentFactory.getAgent()
-                .chat(new AgentRequest(userId, session.getId(), request.getContent(),
-                        history, request.getParams()));
+        AgentOutcome outcome;
+        try {
+            outcome = agentFactory.getAgent()
+                    .chat(new AgentRequest(userId, session.getId(), request.getContent(),
+                            history, request.getParams(), collector));
+        } catch (RuntimeException ex) {
+            collector.fail("模型调用失败");
+            throw ex;
+        }
 
         if (outcome instanceof AgentOutcome.AwaitingConfirmation awaiting) {
-            return saveAwaitingConfirmation(userId, session, request, awaiting);
+            List<AgentTraceStep> steps = collector.awaitingConfirmation();
+            return saveAwaitingConfirmation(
+                    userId, session, request, awaiting, steps, requestId);
         }
 
         AgentReply reply = ((AgentOutcome.Completed) outcome).reply();
+        List<AgentTraceStep> steps = collector.complete();
         ChatMessageResponse response;
         try {
             response = Objects.requireNonNull(transactionTemplate.execute(status -> {
                 insertUserMessage(userId, session.getId(), request.getContent());
                 ChatMessageResponse assistant = insertAssistantMessage(
-                        userId, session.getId(), reply, request.getContent(), request.getParams());
+                        userId, session.getId(), reply, request.getContent(),
+                        request.getParams(), steps);
                 touchSession(session, request.getContent());
                 return assistant;
             }));
@@ -153,7 +169,6 @@ public class ChatServiceImpl implements ChatService {
             throw ex;
         }
 
-        String requestId = resolveRequestId(request.getRequestId());
         chatPushService.streamAssistantMessage(userId, session.getId(), requestId, response);
         return response;
     }
@@ -172,6 +187,9 @@ public class ChatServiceImpl implements ChatService {
         }
 
         String requestId = resolveRequestId(request.getRequestId());
+        AgentTraceCollector collector = new AgentTraceCollector(
+                event -> chatPushService.pushAgentProgress(
+                        userId, confirmMessage.getSessionId(), requestId, event));
         PendingConfirmation pending = pendingConfirmationRegistry.claim(
                 metadata.confirmationId(), userId, messageId);
         if (pending == null) {
@@ -189,27 +207,31 @@ public class ChatServiceImpl implements ChatService {
         try {
             outcome = agentFactory.getAgent().confirm(new AgentConfirmRequest(
                     userId, confirmMessage.getSessionId(), pending.replyId(),
-                    pending.toolCalls(), approved, pending.params()));
+                    pending.toolCalls(), approved, pending.params(), collector));
         } catch (BizException ex) {
+            collector.fail("工具确认状态失效");
             markConfirmationFailed(userId, confirmMessage, pending, requestId);
             throw ex;
         } catch (RuntimeException ex) {
+            collector.fail("模型调用失败");
             markConfirmationFailed(userId, confirmMessage, pending, requestId);
             throw ModelErrorTranslator.translate(ex);
         }
 
         if (outcome instanceof AgentOutcome.AwaitingConfirmation awaiting) {
+            List<AgentTraceStep> steps = collector.awaitingConfirmation();
             return saveFollowUpConfirmation(userId, confirmMessage, pending, awaiting,
-                    resultStatus, requestId);
+                    resultStatus, requestId, steps);
         }
 
         AgentReply reply = ((AgentOutcome.Completed) outcome).reply();
+        List<AgentTraceStep> steps = collector.complete();
         // 恢复调用已成功，此时才落库；落库失败按 500 暴露，不要再翻译成模型错误。
         ToolConfirmResponse response = Objects.requireNonNull(transactionTemplate.execute(status -> {
             ChatMessageResponse updated = updateConfirmStatus(confirmMessage, resultStatus);
             ChatMessageResponse replyResponse = insertAssistantMessage(
                     userId, confirmMessage.getSessionId(), reply,
-                    videoPromptOf(pending.toolCalls(), "生成一个视频短片"), null);
+                    videoPromptOf(pending.toolCalls(), "生成一个视频短片"), null, steps);
             touchSession(confirmMessage.getSessionId());
             return ToolConfirmResponse.builder()
                     .confirmMessage(updated)
@@ -281,7 +303,9 @@ public class ChatServiceImpl implements ChatService {
     private ChatMessageResponse saveAwaitingConfirmation(Long userId,
                                                          ChatSession session,
                                                          SendMessageRequest request,
-                                                         AgentOutcome.AwaitingConfirmation awaiting) {
+                                                         AgentOutcome.AwaitingConfirmation awaiting,
+                                                         List<AgentTraceStep> steps,
+                                                         String requestId) {
         String confirmationId = UUID.randomUUID().toString();
         ChatMessageResponse response;
         try {
@@ -297,7 +321,7 @@ public class ChatServiceImpl implements ChatService {
                         : "需要你确认工具调用：" + toolNameOf(awaiting.toolCalls()));
                 confirmMessage.setMessageType(MESSAGE_TYPE_TOOL_CONFIRM);
                 confirmMessage.setMetadata(buildConfirmMetadata(
-                        awaiting, confirmationId, CONFIRM_STATUS_PENDING));
+                        awaiting, confirmationId, CONFIRM_STATUS_PENDING, steps));
                 chatMessageMapper.insert(confirmMessage);
 
                 touchSession(session, request.getContent());
@@ -313,7 +337,6 @@ public class ChatServiceImpl implements ChatService {
                 awaiting.toolCalls(), request.getParams(), response.getId(),
                 pendingConfirmationRegistry.expiresAt()));
 
-        String requestId = resolveRequestId(request.getRequestId());
         chatPushService.pushToolConfirmRequired(userId, session.getId(), requestId, response);
         return response;
     }
@@ -323,7 +346,8 @@ public class ChatServiceImpl implements ChatService {
                                                          PendingConfirmation pending,
                                                          AgentOutcome.AwaitingConfirmation awaiting,
                                                          String resultStatus,
-                                                         String requestId) {
+                                                         String requestId,
+                                                         List<AgentTraceStep> steps) {
         String newConfirmationId = UUID.randomUUID().toString();
         ToolConfirmResponse response;
         try {
@@ -339,7 +363,7 @@ public class ChatServiceImpl implements ChatService {
                         : "需要你确认工具调用：" + toolNameOf(awaiting.toolCalls()));
                 newCard.setMessageType(MESSAGE_TYPE_TOOL_CONFIRM);
                 newCard.setMetadata(buildConfirmMetadata(
-                        awaiting, newConfirmationId, CONFIRM_STATUS_PENDING));
+                        awaiting, newConfirmationId, CONFIRM_STATUS_PENDING, steps));
                 chatMessageMapper.insert(newCard);
 
                 touchSession(confirmMessage.getSessionId());
@@ -428,12 +452,19 @@ public class ChatServiceImpl implements ChatService {
     private ChatMessageResponse insertAssistantMessage(Long userId, Long sessionId,
                                                        AgentReply reply, String videoPrompt,
                                                        VideoGenerationParams videoParams) {
+        return insertAssistantMessage(userId, sessionId, reply, videoPrompt, videoParams, List.of());
+    }
+
+    private ChatMessageResponse insertAssistantMessage(Long userId, Long sessionId,
+                                                       AgentReply reply, String videoPrompt,
+                                                       VideoGenerationParams videoParams,
+                                                       List<AgentTraceStep> reasoningSteps) {
         ChatMessage assistantMessage = new ChatMessage();
         assistantMessage.setSessionId(sessionId);
         assistantMessage.setUserId(userId);
         assistantMessage.setRole(ChatMessage.ROLE_ASSISTANT);
         assistantMessage.setContent(reply.content());
-        assistantMessage.setMetadata(buildMetadata(reply, videoParams));
+        assistantMessage.setMetadata(buildMetadata(reply, videoParams, reasoningSteps));
         assistantMessage.setMessageType(
                 reply.promptProposal() != null
                         ? "PROMPT_PROPOSAL"
@@ -525,7 +556,8 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    private String buildMetadata(AgentReply reply, VideoGenerationParams videoParams) {
+    private String buildMetadata(AgentReply reply, VideoGenerationParams videoParams,
+                                 List<AgentTraceStep> reasoningSteps) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("videoIntent", reply.videoIntent());
         if (StringUtils.hasText(reply.toolName())) {
@@ -537,12 +569,14 @@ public class ChatServiceImpl implements ChatService {
             metadata.put("videoParams", videoParams == null
                     ? VideoGenerationParams.defaults() : videoParams);
         }
+        putReasoningSteps(metadata, reasoningSteps);
         return writeMetadata(metadata);
     }
 
     private String buildConfirmMetadata(AgentOutcome.AwaitingConfirmation awaiting,
                                         String confirmationId,
-                                        String status) {
+                                        String status,
+                                        List<AgentTraceStep> reasoningSteps) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("videoIntent", false);
         String toolName = toolNameOf(awaiting.toolCalls());
@@ -555,7 +589,15 @@ public class ChatServiceImpl implements ChatService {
         }
         metadata.put("toolCalls", awaiting.toolCalls());
         metadata.put("confirmStatus", status);
+        putReasoningSteps(metadata, reasoningSteps);
         return writeMetadata(metadata);
+    }
+
+    private void putReasoningSteps(Map<String, Object> metadata,
+                                   List<AgentTraceStep> reasoningSteps) {
+        if (reasoningSteps != null && !reasoningSteps.isEmpty()) {
+            metadata.put("reasoningSteps", reasoningSteps);
+        }
     }
 
     private String writeMetadata(Map<String, Object> metadata) {
@@ -698,6 +740,12 @@ public class ChatServiceImpl implements ChatService {
                 JsonNode useOptimized = node.get("useOptimizedPrompt");
                 if (useOptimized != null && !useOptimized.isNull()) {
                     builder.useOptimizedPrompt(useOptimized.asBoolean());
+                }
+                JsonNode reasoningNode = node.get("reasoningSteps");
+                if (reasoningNode != null && reasoningNode.isArray() && !reasoningNode.isEmpty()) {
+                    builder.reasoningSteps(objectMapper.convertValue(reasoningNode,
+                            objectMapper.getTypeFactory()
+                                    .constructCollectionType(List.class, AgentTraceStep.class)));
                 }
             } catch (Exception ex) {
                 log.warn("消息 metadata 解析失败: {}", ex.getMessage());

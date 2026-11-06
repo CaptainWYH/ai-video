@@ -42,7 +42,7 @@ mvn -DskipTests package
 mvn test
 ```
 
-当前有 20 个后端单元测试。运行单个测试使用 `mvn -Dtest=类名 test`；前端暂未配置自动化测试框架。
+当前有 36 个后端单元测试。运行单个测试使用 `mvn -Dtest=类名 test`；前端暂未配置自动化测试框架。
 
 ### 本地地址
 
@@ -111,7 +111,7 @@ mvn test
 
 ## 已知限制
 
-- WebSocket 的流式输出是完整回复切片，不是模型 token 级流式（Mock 与 DeepSeek 模式相同）。
+- WebSocket 的流式输出是完整回复切片，不是模型 token 级流式（Mock 与 DeepSeek 模式相同）；真实模式的推理步骤（思考/工具调用/工具结果）通过 `chat.progress` 事件级实时推送，最终快照持久化在 `chat_messages.metadata.reasoningSteps`，Mock 模式不产生推理步骤。
 - 意图识别：真实模式优先从 AgentScope 工具事件提取 `toolName`，缺失时回退关键词；Mock 模式仍只用关键词。
 - 模型调用失败时不写入用户/助手消息，聊天请求暂无完整幂等机制。
 - 视频任务由单实例数据库调度器推进，高并发时仍需升级 Redis Stream / MQ 和分布式租约。

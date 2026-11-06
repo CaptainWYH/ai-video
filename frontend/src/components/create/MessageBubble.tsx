@@ -1,5 +1,6 @@
 import { UserOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import ReasoningTrace from '@/components/create/ReasoningTrace';
 import type { ChatMessage } from '@/types/chat';
 
 interface MessageBubbleProps {
@@ -34,6 +35,10 @@ export default function MessageBubble({ message, streaming = false }: MessageBub
           {message.toolName ? <span className="msg-tool">{message.toolName}</span> : null}
           <time dateTime={message.createdAt}>{dayjs(message.createdAt).format('HH:mm')}</time>
         </div>
+
+        {!isUser && message.reasoningSteps?.length ? (
+          <ReasoningTrace steps={message.reasoningSteps} />
+        ) : null}
 
         <div className={isUser ? 'msg-user-bubble' : 'msg-assistant-content'}>
           {content}

@@ -4,6 +4,7 @@ import {
   ExclamationCircleOutlined,
   StopOutlined,
 } from '@ant-design/icons';
+import ReasoningTrace from '@/components/create/ReasoningTrace';
 import type { ChatMessage, ConfirmStatus } from '@/types/chat';
 
 interface ToolConfirmCardProps {
@@ -45,69 +46,72 @@ export default function ToolConfirmCard({
       : `AI 请求调用 ${primary?.name ?? message.toolName ?? '工具'}`;
 
   return (
-    <article
-      className={`gen-card tool-confirm-card${status === 'APPROVED' ? ' is-success' : ''}${
-        status === 'DENIED' || status === 'FAILED' || status === 'EXPIRED' ? ' is-failed' : ''
-      }`}
-      aria-live="polite"
-    >
-      <div className="gen-body">
-        <div className="gen-eyebrow">TOOL CONFIRMATION</div>
-        <h3 className="gen-title">{title}</h3>
+    <>
+      {message.reasoningSteps?.length ? <ReasoningTrace steps={message.reasoningSteps} /> : null}
+      <article
+        className={`gen-card tool-confirm-card${status === 'APPROVED' ? ' is-success' : ''}${
+          status === 'DENIED' || status === 'FAILED' || status === 'EXPIRED' ? ' is-failed' : ''
+        }`}
+        aria-live="polite"
+      >
+        <div className="gen-body">
+          <div className="gen-eyebrow">TOOL CONFIRMATION</div>
+          <h3 className="gen-title">{title}</h3>
 
-        <div className="gen-meta">
-          <span>{primary?.name ?? 'tool'}</span>
-          <span>{toolCalls.length} 个调用</span>
-        </div>
-
-        <div className="tool-confirm-params">
-          {toolCalls.map((toolCall) => (
-            <div className="tool-confirm-call" key={toolCall.id}>
-              <div className="tool-confirm-call-name">{toolCall.name}</div>
-              {Object.entries(toolCall.input).map(([key, value]) => (
-                <div className="tool-confirm-param" key={key}>
-                  <span className="tool-confirm-param-key">{key}</span>
-                  <span className="tool-confirm-param-value">{formatValue(value)}</span>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-
-        <div className={`tool-confirm-status is-${status.toLowerCase()}`}>
-          {pending ? (
-            <ExclamationCircleOutlined />
-          ) : status === 'APPROVED' ? (
-            <CheckCircleOutlined />
-          ) : status === 'DENIED' ? (
-            <CloseCircleOutlined />
-          ) : (
-            <StopOutlined />
-          )}
-          <span>{STATUS_LABEL[status]}</span>
-        </div>
-
-        {pending ? (
-          <div className="gen-actions">
-            <button
-              type="button"
-              className="gen-action is-primary"
-              disabled={busy}
-              onClick={() => onConfirm(true)}
-            >
-              {busy ? '处理中…' : '允许执行'}
-            </button>
-            <button
-              type="button"
-              className="gen-action"
-              disabled={busy}
-              onClick={() => onConfirm(false)}
-            >
-              拒绝
-            </button>
+          <div className="gen-meta">
+            <span>{primary?.name ?? 'tool'}</span>
+            <span>{toolCalls.length} 个调用</span>
           </div>
-        ) : null}
-      </div>
-    </article>
+
+          <div className="tool-confirm-params">
+            {toolCalls.map((toolCall) => (
+              <div className="tool-confirm-call" key={toolCall.id}>
+                <div className="tool-confirm-call-name">{toolCall.name}</div>
+                {Object.entries(toolCall.input).map(([key, value]) => (
+                  <div className="tool-confirm-param" key={key}>
+                    <span className="tool-confirm-param-key">{key}</span>
+                    <span className="tool-confirm-param-value">{formatValue(value)}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          <div className={`tool-confirm-status is-${status.toLowerCase()}`}>
+            {pending ? (
+              <ExclamationCircleOutlined />
+            ) : status === 'APPROVED' ? (
+              <CheckCircleOutlined />
+            ) : status === 'DENIED' ? (
+              <CloseCircleOutlined />
+            ) : (
+              <StopOutlined />
+            )}
+            <span>{STATUS_LABEL[status]}</span>
+          </div>
+
+          {pending ? (
+            <div className="gen-actions">
+              <button
+                type="button"
+                className="gen-action is-primary"
+                disabled={busy}
+                onClick={() => onConfirm(true)}
+              >
+                {busy ? '处理中…' : '允许执行'}
+              </button>
+              <button
+                type="button"
+                className="gen-action"
+                disabled={busy}
+                onClick={() => onConfirm(false)}
+              >
+                拒绝
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </article>
+    </>
   );
 }

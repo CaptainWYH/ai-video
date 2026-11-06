@@ -102,6 +102,8 @@ app:
     timeout: ${AGENTSCOPE_TIMEOUT:PT15S}
     max-iters: ${AGENTSCOPE_MAX_ITERS:3}
     max-attempts: ${AGENTSCOPE_MAX_ATTEMPTS:1}
+    # 开启模型流式以获取 reasoning_content 等增量；关闭后仍展示工具/状态级步骤
+    stream: ${AGENTSCOPE_STREAM:true}
     max-history-messages: 20
     # 工具确认挂起窗口；超时后确认接口返回 40900
     confirm-timeout: ${AGENTSCOPE_CONFIRM_TIMEOUT:PT5M}

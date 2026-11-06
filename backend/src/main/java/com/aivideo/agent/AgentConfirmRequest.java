@@ -12,10 +12,13 @@ public record AgentConfirmRequest(Long userId,
                                   String replyId,
                                   List<AgentToolCall> toolCalls,
                                   boolean approved,
-                                  VideoGenerationParams params) {
+                                  VideoGenerationParams params,
+                                  AgentProgressListener progressListener) {
 
     public AgentConfirmRequest {
         toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
         params = params == null ? VideoGenerationParams.defaults() : params;
+        progressListener = progressListener == null
+                ? AgentProgressListener.NOOP : progressListener;
     }
 }

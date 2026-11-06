@@ -1,6 +1,7 @@
 package com.aivideo.chat.dto;
 
 import com.aivideo.agent.AgentToolCall;
+import com.aivideo.agent.AgentTraceStep;
 import com.aivideo.agent.PromptProposal;
 import com.aivideo.video.dto.VideoTaskResponse;
 import lombok.AllArgsConstructor;
@@ -42,5 +43,7 @@ public class ChatMessageResponse {
     private Boolean useOptimizedPrompt;
     /** 与 VIDEO_CARD 消息关联的持久化视频任务 */
     private VideoTaskResponse videoTask;
+    /** 真实 Agent 的推理过程快照；Mock 模式或旧消息为空 */
+    private List<AgentTraceStep> reasoningSteps;
     private LocalDateTime createdAt;
 }

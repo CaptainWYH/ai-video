@@ -237,6 +237,44 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 
 `messageType` 取值 `TEXT` / `PROMPT_PROPOSAL` / `VIDEO_CARD` / `TOOL_CONFIRM`。
 
+`ChatMessageResponse` 还包含 `reasoningSteps`：真实 Agent 的推理过程快照（`TEXT` / `PROMPT_PROPOSAL` / `TOOL_CONFIRM` 消息均可能带），供前端渲染可折叠的「推理过程」卡片。Mock 模式与旧消息该字段缺失或为空数组。
+
+```json
+"reasoningSteps": [
+  {
+    "id": "status:start",
+    "type": "STATUS",
+    "title": "开始分析需求",
+    "status": "SUCCESS",
+    "startedAt": "2026-11-07T03:00:00Z",
+    "endedAt": "2026-11-07T03:00:01Z"
+  },
+  {
+    "id": "thinking:reply-1:block-1",
+    "type": "THINKING",
+    "title": "推理完成",
+    "status": "SUCCESS",
+    "detail": "用户想要……",
+    "startedAt": "2026-11-07T03:00:01Z",
+    "endedAt": "2026-11-07T03:00:02Z"
+  },
+  {
+    "id": "tool:call-1",
+    "type": "TOOL_RESULT",
+    "title": "工具完成",
+    "status": "SUCCESS",
+    "detail": "规划视频提示词 {\"idea\":\"海边日落\"}",
+    "result": "已生成提示词方案",
+    "toolName": "proposeVideoPrompt",
+    "toolCallId": "call-1",
+    "startedAt": "2026-11-07T03:00:02Z",
+    "endedAt": "2026-11-07T03:00:03Z"
+  }
+]
+```
+
+`type` 取值 `STATUS` / `THINKING` / `TOOL_CALL` / `TOOL_RESULT` / `ERROR`；`status` 取值 `RUNNING` / `SUCCESS` / `ERROR` / `PENDING` / `DENIED`。持久化时最多 40 步，思考文本 8000 字符、工具输入与结果各 1500 字符、全部步骤总计 12000 字符，超出追加 `…（已截断）`。
+
 视频创作首先返回 `PROMPT_PROPOSAL`，不会创建视频任务：
 
 ```json
@@ -456,6 +494,7 @@ Seedance 成功后先下载到 MinIO，再返回短期预签名 `resultUrl`。`u
 | type | 时机 | data |
 | --- | --- | --- |
 | `chat.chunk` | 助手回复分片 | `sessionId`、`requestId`、`delta` |
+| `chat.progress` | 真实 Agent 推理步骤更新 | `sessionId`、`requestId`、`step`（`AgentTraceStep`）、`delta`（可选，思考或工具结果增量） |
 | `chat.done` | 回复完成 | `sessionId`、`requestId`、`message` |
 | `chat.tool_confirm_required` | 工具调用等待用户确认 | `sessionId`、`requestId`、`message`（`TOOL_CONFIRM` 卡片） |
 | `chat.tool_confirm_result` | 工具确认状态更新 | `sessionId`、`requestId`、`messageId`、`confirmationId`、`replyId`、`status`、`toolCalls` |
@@ -465,6 +504,7 @@ Seedance 成功后先下载到 MinIO，再返回短期预签名 `resultUrl`。`u
 说明：
 
 - 当前 `chat.chunk` 是完整回复的切片（每片 6 个字符，间隔 40ms），不是模型 token 级流式；Mock 与真实 DeepSeek 模式均如此。
+- `chat.progress` 仅在真实模式（`AGENTSCOPE_ENABLED=true`）产生，按 `step.id` upsert：带 `delta` 时前端追加到 `detail`（`THINKING`）或 `result`（`TOOL_RESULT`），不带 `delta` 时按完整快照覆盖。该事件只用于实时展示、不重放，断线后以 `chat.done` 或 REST 返回的 `reasoningSteps` 为准；Mock 模式不发送。
 - 若客户端离线，后端直接跳过推送；REST 接口仍会返回完整消息。
 - 前端在收到 `chat.done` 后结束占位气泡；若 5 秒内未收到，则以 POST 返回结果兜底。
 - 视频状态变更会关联到对应 `VIDEO_CARD` 消息；WebSocket 断线时通过 REST 轮询和历史消息恢复。

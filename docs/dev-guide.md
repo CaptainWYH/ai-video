@@ -192,6 +192,7 @@ mvn test                                             # 运行全部后端单元�
 | `DEEPSEEK_BASE_URL` | DeepSeek / 兼容网关地址 | `https://api.deepseek.com` |
 | `AGENTSCOPE_TIMEOUT` | 单次模型调用超时 | `PT15S`（需小于前端 20s） |
 | `AGENTSCOPE_MAX_ITERS` / `AGENTSCOPE_MAX_ATTEMPTS` | ReAct 迭代上限 / 模型调用尝试次数 | `3` / `1` |
+| `AGENTSCOPE_STREAM` | 是否开启模型流式（获取 thinking 增量） | 默认 `true`；关闭后仍展示工具/状态步骤 |
 | `AGENTSCOPE_CONFIRM_TIMEOUT` | 工具确认挂起有效期 | ISO-8601，默认 `PT5M` |
 | `VIDEO_PROVIDER` | 视频服务：`mock` / `seedance` | 默认 `mock` |
 | `ARK_API_KEY` | 火山方舟 API Key | Seedance 模式必填 |

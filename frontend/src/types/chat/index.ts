@@ -24,6 +24,36 @@ export interface PromptProposal {
   toolName: string;
 }
 
+export type AgentTraceType = 'STATUS' | 'THINKING' | 'TOOL_CALL' | 'TOOL_RESULT' | 'ERROR';
+
+export type AgentTraceStatus = 'RUNNING' | 'SUCCESS' | 'ERROR' | 'PENDING' | 'DENIED';
+
+export interface AgentTraceStep {
+  id: string;
+  type: AgentTraceType;
+  title?: string | null;
+  status?: AgentTraceStatus | null;
+  detail?: string | null;
+  result?: string | null;
+  toolName?: string | null;
+  toolCallId?: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+}
+
+export interface ChatProgressData {
+  sessionId: number;
+  requestId: string;
+  step: AgentTraceStep;
+  delta?: string | null;
+}
+
+export interface LiveTrace {
+  requestId: string;
+  sessionId: number;
+  steps: AgentTraceStep[];
+}
+
 export interface ChatMessage {
   id: number;
   sessionId: number;
@@ -40,6 +70,7 @@ export interface ChatMessage {
   promptDecisionStatus?: 'PENDING' | 'SELECTED' | null;
   useOptimizedPrompt?: boolean | null;
   videoTask?: VideoTask | null;
+  reasoningSteps?: AgentTraceStep[] | null;
   createdAt: string;
 }
 

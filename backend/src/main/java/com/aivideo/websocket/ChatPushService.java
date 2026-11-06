@@ -1,5 +1,6 @@
 package com.aivideo.websocket;
 
+import com.aivideo.agent.AgentProgressEvent;
 import com.aivideo.agent.AgentToolCall;
 import com.aivideo.chat.dto.ChatMessageResponse;
 import com.aivideo.video.dto.VideoUsageResponse;
@@ -113,13 +114,36 @@ public class ChatPushService {
         send(userId, "video.progress", data);
     }
 
+    /**
+     * 推送 Agent 推理进度。同步发送以保留同一 requestId 内的事件顺序；
+     * 无 WebSocket 连接时直接跳过，最终轨迹以 REST 返回的 reasoningSteps 为准。
+     */
+    public void pushAgentProgress(Long userId, Long sessionId, String requestId,
+                                  AgentProgressEvent event) {
+        if (sessionRegistry.get(userId).isEmpty()) {
+            return;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("sessionId", sessionId);
+        data.put("requestId", requestId);
+        data.put("step", event.step());
+        if (event.delta() != null && !event.delta().isEmpty()) {
+            data.put("delta", event.delta());
+        }
+        send(userId, "chat.progress", data);
+    }
+
     private void send(Long userId, String type, Object data) {
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("type", type);
         event.put("data", data);
         try {
             String payload = objectMapper.writeValueAsString(event);
-            log.info("[WS 推送] userId={}, type={}", userId, type);
+            if ("chat.progress".equals(type)) {
+                log.debug("[WS 推送] userId={}, type={}", userId, type);
+            } else {
+                log.info("[WS 推送] userId={}, type={}", userId, type);
+            }
             for (WebSocketSession session : sessionRegistry.get(userId)) {
                 if (!session.isOpen()) {
                     continue;
