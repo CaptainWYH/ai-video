@@ -7,6 +7,7 @@ import type {
   ChatDoneData,
   ToolConfirmRequiredData,
   ToolConfirmResultData,
+  VideoProgressData,
   WsEvent,
 } from '@/types/chat';
 
@@ -66,6 +67,9 @@ export function useChatSocket(enabled = true): void {
           } else if (payload.type === 'chat.tool_confirm_result') {
             const data = payload.data as ToolConfirmResultData;
             useChatStore.getState().handleToolConfirmResult(data);
+          } else if (payload.type === 'video.progress') {
+            const data = payload.data as VideoProgressData;
+            useChatStore.getState().handleVideoProgress(data);
           }
         } catch {
           // 忽略非 JSON 消息（例如 pong）

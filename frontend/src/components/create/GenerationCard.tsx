@@ -4,6 +4,7 @@ import {
   ExclamationCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
+import { useEffect, useState } from 'react';
 import type { DraftParams } from '@/stores/draftStore';
 import type { VideoTask } from '@/types/video';
 
@@ -13,6 +14,7 @@ interface GenerationCardProps {
   task: VideoTask | null;
   error?: string | null;
   onRetry: () => void;
+  onCancel?: () => void;
   onWorks: () => void;
 }
 
@@ -30,20 +32,49 @@ export default function GenerationCard({
   task,
   error,
   onRetry,
+  onCancel,
   onWorks,
 }: GenerationCardProps) {
   const status = task?.status ?? (error ? 'FAILED' : 'PENDING');
   const progress = task?.progress ?? 0;
-  const active = status === 'PENDING' || status === 'RUNNING';
+  const active = ['PENDING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(status);
   const success = status === 'SUCCESS';
-  const failed = status === 'FAILED';
-  const statusLabel = success
-    ? '已完成'
-    : failed
-      ? '未完成'
-      : status === 'PENDING'
-        ? '排队中'
-        : `生成中 ${progress}%`;
+  const failed = ['FAILED', 'CANCELLED', 'EXPIRED'].includes(status);
+  const isMock = task?.provider?.toUpperCase() === 'MOCK';
+  const providerLabel = isMock ? 'MOCK' : (task?.provider?.toUpperCase() ?? 'VIDEO');
+  const playable = success && Boolean(task?.resultUrl) && !isMock;
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!task?.createdAt) {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+    const startedAt = new Date(task.createdAt).getTime();
+    const update = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    };
+    update();
+    if (!active) {
+      return undefined;
+    }
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [active, task?.id, task?.createdAt]);
+
+  const statusLabel =
+    {
+      PENDING: '准备提交',
+      SUBMITTING: '提交中',
+      QUEUED: '排队中',
+      RUNNING: '生成中',
+      DOWNLOADING: '正在保存',
+      SUCCESS: '已完成',
+      FAILED: '生成失败',
+      CANCELLED: '已取消',
+      EXPIRED: '已超时',
+    }[status] ?? status;
+  const usage = task?.usage;
 
   return (
     <article
@@ -52,15 +83,27 @@ export default function GenerationCard({
     >
       <div className="gen-poster">
         <div className="gen-poster-grain" aria-hidden="true" />
-        <span className={`gen-status${active ? ' is-active' : ''}`}>{statusLabel}</span>
-        <div className="gen-poster-center">
-          <span className="gen-poster-mark" aria-hidden="true">
-            AI
-          </span>
-          <span className="gen-poster-code">
-            {task ? `GEN / ${String(task.id).padStart(3, '0')}` : 'PREPARING'}
-          </span>
-        </div>
+        <span className={`gen-status${active ? ' is-active' : ''}`}>
+          {active ? `视频正在生成中 · ${elapsedSeconds} 秒` : statusLabel}
+        </span>
+        {playable && task?.resultUrl ? (
+          <video
+            className="gen-video"
+            src={task.resultUrl}
+            controls
+            playsInline
+            preload="metadata"
+          />
+        ) : (
+          <div className="gen-poster-center">
+            <span className="gen-poster-mark" aria-hidden="true">
+              AI
+            </span>
+            <span className="gen-poster-code">
+              {task ? `GEN / ${String(task.id).padStart(3, '0')}` : 'PREPARING'}
+            </span>
+          </div>
+        )}
         {active ? (
           <div className="gen-progress" aria-hidden="true">
             <span style={{ width: `${Math.max(progress, 4)}%` }} />
@@ -70,7 +113,11 @@ export default function GenerationCard({
 
       <div className="gen-body">
         <div className="gen-eyebrow">
-          {active ? 'GENERATING' : success ? 'GENERATION COMPLETE' : 'GENERATION FAILED'}
+          {active
+            ? `${providerLabel} / PROCESSING`
+            : success
+              ? `${providerLabel} / COMPLETE`
+              : `${providerLabel} / FAILED`}
         </div>
         <h3 className="gen-title">{prompt}</h3>
 
@@ -89,24 +136,39 @@ export default function GenerationCard({
         ) : success ? (
           <div className="gen-message is-success">
             <CheckCircleOutlined />
-            <span>任务已完成，结果链接为占位示例。</span>
+            <span>
+              {isMock
+                ? `Mock 任务已完成，用时 ${elapsedSeconds} 秒；示例地址不可播放。`
+                : `视频已生成并保存，用时 ${elapsedSeconds} 秒。`}
+            </span>
           </div>
         ) : (
           <div className="gen-message">
             <span className="gen-pulse" aria-hidden="true" />
-            <span>正在生成画面，离开页面不会中断任务。</span>
+            <span>
+              {status === 'DOWNLOADING'
+                ? `画面已生成，正在转存到作品库 · ${elapsedSeconds} 秒`
+                : `视频正在生成中 · 已等待 ${elapsedSeconds} 秒`}
+            </span>
           </div>
         )}
 
+        {usage?.completionTokens ? (
+          <div className="gen-usage">
+            消耗 {usage.completionTokens.toLocaleString()} token · 预估 ¥
+            {Number(usage.estimatedCostCny ?? 0).toFixed(4)}
+          </div>
+        ) : null}
+
         <div className="gen-actions">
-          {success && task?.resultUrl ? (
+          {playable && task?.resultUrl ? (
             <a
               className="gen-action is-primary"
               href={task.resultUrl}
               target="_blank"
               rel="noreferrer"
             >
-              查看示例结果
+              播放视频
               <ArrowRightOutlined />
             </a>
           ) : null}
@@ -114,6 +176,11 @@ export default function GenerationCard({
             <button type="button" className="gen-action is-primary" onClick={onRetry}>
               <ReloadOutlined />
               重新生成
+            </button>
+          ) : null}
+          {onCancel && ['PENDING', 'QUEUED'].includes(status) ? (
+            <button type="button" className="gen-action" onClick={onCancel}>
+              取消任务
             </button>
           ) : null}
           <button type="button" className="gen-action" onClick={onWorks}>

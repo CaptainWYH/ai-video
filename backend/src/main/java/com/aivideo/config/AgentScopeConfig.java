@@ -33,11 +33,12 @@ public class AgentScopeConfig {
     private static final String DEEPSEEK_PREFIX = "deepseek:";
 
     private final AgentScopeProperties properties;
+    private final VideoAssistantTools videoAssistantTools;
 
     @Bean
     public Toolkit videoAssistantToolkit() {
         Toolkit toolkit = new Toolkit();
-        toolkit.registerTool(new VideoAssistantTools());
+        toolkit.registerTool(videoAssistantTools);
         return toolkit;
     }
 

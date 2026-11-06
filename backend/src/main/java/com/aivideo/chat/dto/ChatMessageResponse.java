@@ -1,6 +1,8 @@
 package com.aivideo.chat.dto;
 
 import com.aivideo.agent.AgentToolCall;
+import com.aivideo.agent.PromptProposal;
+import com.aivideo.video.dto.VideoTaskResponse;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -20,7 +22,7 @@ public class ChatMessageResponse {
     private String role;
     private String content;
     private String messageType;
-    /** 是否触发视频生成意图，前端据此展示占位卡片 */
+    /** 是否已创建视频任务，前端据此展示视频卡片 */
     private boolean videoIntent;
     /** 触发的占位工具名，例如 generateStoryboard */
     private String toolName;
@@ -32,5 +34,13 @@ public class ChatMessageResponse {
     private List<AgentToolCall> toolCalls;
     /** 工具确认卡片状态：PENDING / APPROVED / DENIED / EXPIRED / FAILED */
     private String confirmStatus;
+    /** Agent 生成的视频提示词优化方案 */
+    private PromptProposal promptProposal;
+    /** 提示词方案状态：PENDING / SELECTED */
+    private String promptDecisionStatus;
+    /** 用户最终是否选择了优化版 */
+    private Boolean useOptimizedPrompt;
+    /** 与 VIDEO_CARD 消息关联的持久化视频任务 */
+    private VideoTaskResponse videoTask;
     private LocalDateTime createdAt;
 }

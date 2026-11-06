@@ -4,6 +4,8 @@ import com.aivideo.chat.dto.ChatMessageResponse;
 import com.aivideo.chat.dto.ChatSessionResponse;
 import com.aivideo.chat.dto.ConfirmToolCallRequest;
 import com.aivideo.chat.dto.CreateSessionRequest;
+import com.aivideo.chat.dto.PromptDecisionRequest;
+import com.aivideo.chat.dto.PromptDecisionResponse;
 import com.aivideo.chat.dto.SendMessageRequest;
 import com.aivideo.chat.dto.ToolConfirmResponse;
 import com.aivideo.chat.service.ChatService;
@@ -68,6 +70,15 @@ public class ChatController {
             @PathVariable("id") Long messageId,
             @Valid @RequestBody ConfirmToolCallRequest request) {
         return Result.ok(chatService.confirmToolCall(
+                SecurityUtils.currentUserId(), messageId, request));
+    }
+
+    @Operation(summary = "选择原版或优化版提示词并确认生成")
+    @PostMapping("/messages/{id}/prompt-decision")
+    public Result<PromptDecisionResponse> decidePrompt(
+            @PathVariable("id") Long messageId,
+            @Valid @RequestBody PromptDecisionRequest request) {
+        return Result.ok(chatService.decidePrompt(
                 SecurityUtils.currentUserId(), messageId, request));
     }
 }

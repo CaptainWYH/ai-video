@@ -5,7 +5,12 @@ package com.aivideo.video.entity;
  */
 public enum VideoTaskStatus {
     PENDING,
+    SUBMITTING,
+    QUEUED,
     RUNNING,
+    DOWNLOADING,
     SUCCESS,
-    FAILED
+    FAILED,
+    CANCELLED,
+    EXPIRED
 }

@@ -1,8 +1,8 @@
 # 基于AgentScope 实现AI Video Studio （功能陆续完善中）
 
-面向 PC 端的 AI 视频创作工具骨架。以「对话 → 分镜 → 视频任务」为主线，前后端分离，当前阶段聚焦工程结构、认证闭环、对话闭环与视频任务占位流程。
+面向 PC 端的 AI 视频创作工具。以「对话 → 分镜 → 视频任务」为主线，前后端分离，已接入火山方舟 Seedance 异步视频生成、状态回传和消耗统计。
 
-> 本仓库是**可运行的最小闭环骨架**：用户注册/登录、会话与消息持久化、Mock / DeepSeek 可切换的对话、WebSocket 模拟流式输出、视频任务状态模拟均已打通；真实视频生成尚未接入。
+> 本仓库可运行完整创作闭环：注册/登录、会话与消息持久化、Mock / DeepSeek 可切换的对话、WebSocket 状态推送，以及 Mock / Seedance 可切换的视频任务。默认使用 Mock，配置 `ARK_API_KEY` 后切换真实 Seedance。
 
 ## 技术栈
 
@@ -10,7 +10,7 @@
 | --- | --- |
 | 前端 | React 18、TypeScript、Vite 5、Ant Design 5、Zustand、React Router 6、Axios |
 | 后端 | Java 21、Spring Boot 3.3、Spring Security、Spring WebSocket、MyBatis-Plus、SpringDoc |
-| 存储 | MySQL 8、Redis 7、MinIO（接口预留） |
+| 存储 | MySQL 8、Redis 7、MinIO |
 | AI | AgentScope Java 2.0（`ReActAgent` + `Toolkit`），默认 Mock，可切换 DeepSeek（OpenAI 兼容） |
 | 认证 | JWT access token + refresh token（刷新旋转、Redis 白名单/黑名单） |
 
@@ -46,9 +46,9 @@ ai-video/
     │   ├── config/               # Security、WebSocket、AgentScope 等
     │   ├── project/              # 创作项目
     │   ├── security/             # JWT、TokenStore、过滤器
-    │   ├── storage/              # 对象存储抽象（占位）
+    │   ├── storage/              # MinIO 对象存储、流式上传与预签名
     │   ├── user/                 # 用户实体与查询
-    │   ├── video/                # 视频任务（占位实现）
+    │   ├── video/                # Seedance / Mock 视频任务与消耗统计
     │   └── websocket/            # 握手、会话注册表、推送
     ├── src/main/resources/
     │   ├── application.yml
@@ -151,6 +151,14 @@ cp .env.example .env
 | `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` | ISO-8601 有效期 | `PT30M` / `P7D` |
 | `STORAGE_PROVIDER` | 对象存储实现 | `minio` |
 | `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` / `MINIO_BUCKET` | MinIO 配置 | `http://localhost:9000` / `minioadmin` / `minioadmin` / `aivideo` |
+| `MINIO_PRESIGNED_TTL` | 视频预签名地址有效期 | `PT15M` |
+| `VIDEO_PROVIDER` | `mock` 或 `seedance` | `mock` |
+| `ARK_API_KEY` | 火山方舟 API Key，Seedance 模式必填 | 无 |
+| `SEEDANCE_MODEL` | Seedance Model ID | `doubao-seedance-2-5-260628` |
+| `SEEDANCE_STATUS_SYNC_MODE` | `polling`、`callback` 或 `hybrid` | `polling` |
+| `SEEDANCE_CALLBACK_BASE_URL` | 公网 HTTPS 服务地址 | 空 |
+| `SEEDANCE_CALLBACK_SECRET` | Seedance 回调 HMAC 密钥 | 空 |
+| `SEEDANCE_POLL_INTERVAL` | 轮询间隔 | `PT5S` |
 | `AGENTSCOPE_ENABLED` | 是否启用真实 Agent | `false` |
 | `AGENTSCOPE_MODEL` | AgentScope 模型标识（需 `deepseek:` 前缀） | `deepseek:deepseek-v4-flash` |
 | `DEEPSEEK_API_KEY` | 启用真实模型时必填 | 无 |
@@ -169,27 +177,37 @@ cp .env.example .env
 
 - **用户闭环**：注册（BCrypt 加密）、登录（用户名或邮箱）、刷新 token、登出、`/auth/me`；前端表单校验与错误提示。
 - **对话闭环**：创建会话、会话分页、历史消息分页、发送消息；消息持久化到 MySQL；默认 Mock Agent 不发起网络请求，设置 `AGENTSCOPE_ENABLED=true` + `DEEPSEEK_API_KEY` 后切换真实 DeepSeek。
+- **提示词确认流程**：Agent 先调用 `proposeVideoPrompt` 返回原版、优化版和结构化分析步骤；用户选择版本后才调用 `generateVideoClip`。
 - **实时输出**：原生 WebSocket `/ws/chat?token=...`，后端按 6 字符/40ms 推送 `chat.chunk`，结束发送 `chat.done`；前端带 5 秒同步兜底。
-- **视频任务**：`POST /video/tasks` 创建任务、查询详情/分页列表；异步模拟 `PENDING → RUNNING 30% → RUNNING 70% → SUCCESS 100%`。
+- **视频任务**：支持 Mock 与 Seedance 2.5；任务持久化、自动提交、轮询/回调/混合状态同步、排队任务取消、失败重试。
+- **视频结果**：Success 后及时从火山方舟转存至 MinIO，通过短期预签名地址播放，避免官方 24 小时临时链接失效。
+- **进度与消耗**：WebSocket `video.progress` 同步到对话卡片，按秒显示等待时间；记录 `completion_tokens`、单价快照和预估人民币费用，并提供汇总接口。
+- **参数控制**：聊天请求和工具使用显式 `VideoGenerationParams`；支持 480p / 720p / 1080p、画幅、时长、风格和声音选择，界面参数优先。
 - **工程能力**：统一 `Result<T>` / 错误码 / 全局异常处理、参数校验、Swagger 注解、CORS、逻辑删除、统一分页、对象存储扩展点。
 
-## 当前占位与 TODO
+## 当前完成情况与 TODO
 
-- [x] 接入真实大模型：已按最小可用方案接入 DeepSeek（`agentscope-extensions-model-openai` + `deepseek:` provider）。
-- [ ] 模型体验增强：token 级真流式、从 AgentScope 工具调用事件提取真实意图（当前仍为关键词识别与完整回复切片）。
-- [ ] 接入真实视频生成服务（如可灵、即梦、Runway 等），替换 `VideoGenerationServiceImpl` 中的模拟状态机。
-- [ ] 使用 Redis / MQ 承载视频任务队列，支持重试、超时、取消与回调。
-- [ ] MinIO 实际写入与预签名 URL（`MinioObjectStorageService` 目前仅保留接口）。
+- [x] 接入真实大模型：已接入 DeepSeek（`agentscope-extensions-model-openai` + `deepseek:` provider）。
+- [x] 接入火山方舟 Seedance 2.5 异步视频生成、回调签名和轮询兜底。
+- [x] 接入 MinIO 流式上传与预签名 URL。
+- [x] 记录 Seedance token 用量和预估费用。
+- [x] 实现提示词优化、原版/优化版选择、分析步骤和工具调用展示，确认后才创建视频任务。
+- [x] 视频状态持久化关联到聊天消息，支持按秒计时、WebSocket 更新和刷新恢复。
+- [x] 从 AgentScope 工具调用事件提取工具名，关键词识别仅作为兜底。
+- [x] 参数改为强类型 DTO，并修复工具确认时 `content` 为空、界面参数被模型覆盖的问题。
+- [x] 已增加参数映射、回调签名、工具上下文、Seedance 请求序列化等 20 个后端单元测试。
+- [ ] 模型 token 级真流式输出（当前仍为完整回复切片推送）。
+- [ ] 将数据库任务队列升级为 Redis Stream / MQ，支撑更高并发和独立消费者扩容。
 - [ ] 将视频任务与项目、分镜数据关联，支持从聊天结果一键生成项目。
 - [ ] 验证码、限流、登录失败锁定等安全增强。
-- [ ] 单元测试、集成测试与 CI 流水线。
+- [ ] 增加业务集成测试、前端自动化测试和 CI 流水线。
 - [ ] 生产部署配置（HTTPS、真实 Redis、外部化 JWT 密钥、日志与监控）。
 
 更多设计说明见 [`docs/architecture.md`](docs/architecture.md)，接口清单见 [`docs/api-convention.md`](docs/api-convention.md)，开发约定见 [`docs/dev-guide.md`](docs/dev-guide.md)。
 
 ## 免责声明
 
-仓库内所有视频结果 URL 均为 `https://example.com/...` 占位地址，不包含真实生成内容。
+Mock 模式的视频结果仍为 `https://example.com/...` 示例地址；Seedance 模式生成真实视频，并保存到 MinIO。
 
 ### 展示截图
 ![img.png](img.png)

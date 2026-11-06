@@ -1,10 +1,11 @@
 import { ArrowRightOutlined, LoadingOutlined } from '@ant-design/icons';
 import { Drawer, Spin, message } from 'antd';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import GenerationCard from '@/components/create/GenerationCard';
 import MessageBubble from '@/components/create/MessageBubble';
 import PromptComposer from '@/components/create/PromptComposer';
+import PromptProposalCard from '@/components/create/PromptProposalCard';
 import ToolConfirmCard from '@/components/create/ToolConfirmCard';
 import WorkspaceSidebar from '@/components/create/WorkspaceSidebar';
 import WorkspaceTopBar from '@/components/create/WorkspaceTopBar';
@@ -18,13 +19,6 @@ import { getErrorMessage } from '@/utils/error';
 import { tokenStorage } from '@/utils/tokenStorage';
 import type { ChatMessage } from '@/types/chat';
 import type { VideoTask } from '@/types/video';
-
-interface ActiveGeneration {
-  prompt: string;
-  params: DraftParams;
-  task: VideoTask | null;
-  error: string | null;
-}
 
 const SUGGESTIONS = [
   '海边日落，镜头从低处缓慢推进，暖金色调，电影感',
@@ -48,11 +42,14 @@ export default function CreatePage() {
   const streaming = useChatStore((state) => state.streaming);
   const socketConnected = useChatStore((state) => state.socketConnected);
   const confirmingMessageId = useChatStore((state) => state.confirmingMessageId);
+  const decidingPromptMessageId = useChatStore((state) => state.decidingPromptMessageId);
+  const handleVideoProgress = useChatStore((state) => state.handleVideoProgress);
   const loadSessions = useChatStore((state) => state.loadSessions);
   const createSession = useChatStore((state) => state.createSession);
   const selectSession = useChatStore((state) => state.selectSession);
   const sendMessage = useChatStore((state) => state.sendMessage);
   const confirmToolCall = useChatStore((state) => state.confirmToolCall);
+  const decidePrompt = useChatStore((state) => state.decidePrompt);
   const resetChat = useChatStore((state) => state.reset);
 
   const prompt = useDraftStore((state) => state.prompt);
@@ -65,7 +62,6 @@ export default function CreatePage() {
   const [creating, setCreating] = useState(false);
   const [sending, setSending] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
-  const [generation, setGeneration] = useState<ActiveGeneration | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loggedIn = Boolean(tokenStorage.getAccessToken());
@@ -107,56 +103,48 @@ export default function CreatePage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, streaming?.content, generation?.task?.status]);
+  }, [messages, streaming?.content]);
 
-  const taskId = generation?.task?.id;
-  const taskStatus = generation?.task?.status;
+  const activeVideoTasks = messages
+    .map((item) => item.videoTask)
+    .filter((task): task is VideoTask => Boolean(task))
+    .filter((task) =>
+      ['PENDING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(task.status),
+    );
+  const activeVideoTaskKey = activeVideoTasks.map((task) => task.id).join(',');
 
   useEffect(() => {
-    if (!taskId || !taskStatus || (taskStatus !== 'PENDING' && taskStatus !== 'RUNNING')) {
+    if (!activeVideoTaskKey) {
       return undefined;
     }
-    const timer = window.setInterval(() => {
-      videoApi
-        .getTask(taskId)
-        .then((updated) => {
-          setGeneration((current) =>
-            current && current.task?.id === updated.id ? { ...current, task: updated } : current,
-          );
-        })
-        .catch(() => {
-          // 轮询失败时保留当前状态，下一次继续尝试
-        });
-    }, 2000);
+    const taskIds = activeVideoTaskKey.split(',').map(Number);
+    const refresh = () => {
+      void Promise.all(taskIds.map((taskId) => videoApi.getTask(taskId).catch(() => null))).then(
+        (tasks) => {
+          tasks.filter((task): task is VideoTask => Boolean(task)).forEach((task) => {
+            handleVideoProgress({
+              taskId: task.id,
+              sessionId: activeSessionId,
+              status: task.status,
+              progress: task.progress,
+              resultUrl: task.resultUrl,
+              usage: task.usage,
+            });
+          });
+        },
+      );
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 3000);
     return () => window.clearInterval(timer);
-  }, [taskId, taskStatus]);
-
-  const startVideoTask = useCallback(async (text: string, nextParams: DraftParams) => {
-    setGeneration({ prompt: text, params: nextParams, task: null, error: null });
-    try {
-      const task = await videoApi.createTask({
-        prompt: text,
-        params: { ...nextParams },
-      });
-      setGeneration((current) =>
-        current && current.prompt === text ? { ...current, task, error: null } : current,
-      );
-    } catch (error) {
-      setGeneration((current) =>
-        current && current.prompt === text
-          ? { ...current, error: getErrorMessage(error) }
-          : current,
-      );
-    }
-  }, []);
+  }, [activeVideoTaskKey, activeSessionId, handleVideoProgress]);
 
   const generateNow = useCallback(
     async (text: string, nextParams: DraftParams) => {
       setSending(true);
       setComposerError(null);
-      setGeneration(null);
       try {
-        const reply = await sendMessage(text);
+        const reply = await sendMessage(text, { ...nextParams });
         if (!reply) {
           return;
         }
@@ -165,16 +153,13 @@ export default function CreatePage() {
           // 等待用户在消息流内完成确认，不再自动创建视频任务。
           return;
         }
-        if (reply.videoIntent) {
-          await startVideoTask(text, nextParams);
-        }
       } catch (error) {
         setComposerError(getErrorMessage(error));
       } finally {
         setSending(false);
       }
     },
-    [sendMessage, clearPrompt, startVideoTask],
+    [sendMessage, clearPrompt],
   );
 
   const handleConfirm = useCallback(
@@ -186,6 +171,18 @@ export default function CreatePage() {
       }
     },
     [confirmToolCall],
+  );
+
+  const handlePromptDecision = useCallback(
+    async (messageId: number, useOptimizedPrompt: boolean) => {
+      try {
+        await decidePrompt(messageId, useOptimizedPrompt);
+        message.success(useOptimizedPrompt ? '已采用优化版提示词' : '已采用原始提示词');
+      } catch (error) {
+        message.error(getErrorMessage(error));
+      }
+    },
+    [decidePrompt],
   );
 
   const handleGenerate = useCallback(() => {
@@ -207,7 +204,6 @@ export default function CreatePage() {
 
   const handleNew = async () => {
     setDrawerOpen(false);
-    setGeneration(null);
     setComposerError(null);
     if (!loggedIn) {
       clearPrompt();
@@ -229,7 +225,6 @@ export default function CreatePage() {
     if (sessionId === activeSessionId) {
       return;
     }
-    setGeneration(null);
     setComposerError(null);
     try {
       await selectSession(sessionId);
@@ -275,7 +270,35 @@ export default function CreatePage() {
       }
     : null;
 
-  const showEmpty = !loadingMessages && messages.length === 0 && !streamingMessage && !generation;
+  const showEmpty = !loadingMessages && messages.length === 0 && !streamingMessage;
+
+  const retryVideo = async (task: VideoTask) => {
+    try {
+      await videoApi.retryTask(task.id);
+      if (activeSessionId) {
+        await selectSession(activeSessionId);
+      }
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const cancelVideo = async (task: VideoTask) => {
+    try {
+      const updated = await videoApi.cancelTask(task.id);
+      handleVideoProgress({
+        taskId: updated.id,
+        sessionId: updated.id ? activeSessionId : null,
+        status: updated.status,
+        progress: updated.progress,
+        resultUrl: updated.resultUrl,
+        usage: updated.usage,
+      });
+      message.success('已取消视频任务');
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
 
   return (
     <div className="create-shell">
@@ -346,30 +369,40 @@ export default function CreatePage() {
               </div>
             ) : (
               <div className="thread-messages">
-                {messages.map((item) =>
-                  item.messageType === 'TOOL_CONFIRM' ? (
-                    <ToolConfirmCard
-                      key={item.id}
-                      message={item}
-                      busy={confirmingMessageId === item.id}
-                      onConfirm={(approved) => void handleConfirm(item.id, approved)}
-                    />
-                  ) : (
-                    <MessageBubble key={item.id} message={item} />
-                  ),
-                )}
+                {messages.map((item) => (
+                  <Fragment key={item.id}>
+                    {item.messageType === 'PROMPT_PROPOSAL' ? (
+                      <PromptProposalCard
+                        message={item}
+                        busy={decidingPromptMessageId === item.id}
+                        onConfirm={(useOptimizedPrompt) =>
+                          void handlePromptDecision(item.id, useOptimizedPrompt)
+                        }
+                      />
+                    ) : item.messageType === 'TOOL_CONFIRM' ? (
+                      <ToolConfirmCard
+                        message={item}
+                        busy={confirmingMessageId === item.id}
+                        onConfirm={(approved) => void handleConfirm(item.id, approved)}
+                      />
+                    ) : (
+                      <MessageBubble message={item} />
+                    )}
+                    {item.videoTask ? (
+                      <GenerationCard
+                        prompt={item.videoTask.prompt}
+                        params={item.videoTask.params}
+                        task={item.videoTask}
+                        error={item.videoTask.errorMessage}
+                        onRetry={() => void retryVideo(item.videoTask as VideoTask)}
+                        onCancel={() => void cancelVideo(item.videoTask as VideoTask)}
+                        onWorks={handleWorks}
+                      />
+                    ) : null}
+                  </Fragment>
+                ))}
                 {streamingMessage ? (
                   <MessageBubble message={streamingMessage} streaming />
-                ) : null}
-                {generation ? (
-                  <GenerationCard
-                    prompt={generation.prompt}
-                    params={generation.params}
-                    task={generation.task}
-                    error={generation.error}
-                    onRetry={() => void startVideoTask(generation.prompt, generation.params)}
-                    onWorks={handleWorks}
-                  />
                 ) : null}
                 <div ref={bottomRef} />
               </div>

@@ -159,7 +159,7 @@ npm run format     # Prettier 格式化 src
 mvn spring-boot:run                                  # 默认 MySQL + Redis
 mvn spring-boot:run "-Dspring-boot.run.profiles=dev" # H2 + 内存 TokenStore
 mvn -DskipTests package                              # 打包
-mvn test                                             # 测试（当前暂无用例）
+mvn test                                             # 运行全部后端单元测试
 ```
 
 构建成功后产物位于 `backend/target/*.jar`，可通过 `java -jar` 启动。
@@ -193,6 +193,13 @@ mvn test                                             # 测试（当前暂无用�
 | `AGENTSCOPE_TIMEOUT` | 单次模型调用超时 | `PT15S`（需小于前端 20s） |
 | `AGENTSCOPE_MAX_ITERS` / `AGENTSCOPE_MAX_ATTEMPTS` | ReAct 迭代上限 / 模型调用尝试次数 | `3` / `1` |
 | `AGENTSCOPE_CONFIRM_TIMEOUT` | 工具确认挂起有效期 | ISO-8601，默认 `PT5M` |
+| `VIDEO_PROVIDER` | 视频服务：`mock` / `seedance` | 默认 `mock` |
+| `ARK_API_KEY` | 火山方舟 API Key | Seedance 模式必填 |
+| `SEEDANCE_MODEL` | Seedance Model ID | `doubao-seedance-2-5-260628` |
+| `SEEDANCE_STATUS_SYNC_MODE` | `polling` / `callback` / `hybrid` | 本地推荐 `polling` |
+| `SEEDANCE_CALLBACK_BASE_URL` | 公网 HTTPS 服务地址 | callback / hybrid 可选 |
+| `SEEDANCE_CALLBACK_SECRET` | 回调路径 HMAC 密钥 | 配合回调地址使用 |
+| `SEEDANCE_POLL_INTERVAL` | 轮询间隔 | 默认 `PT5S` |
 
 完整清单见 [`backend/.env.example`](../backend/.env.example)。不要提交真实 `.env` 或密钥；`.gitignore` 已忽略 `.env`。
 
@@ -213,11 +220,27 @@ mvn test                                             # 测试（当前暂无用�
 
 真实模式默认对 `generateVideoClip` 开启「调用前用户确认」：
 
-1. 启动后端（`AGENTSCOPE_ENABLED=true` + `DEEPSEEK_API_KEY`）和前端。
-2. 在 `/create` 输入含视频意图的内容，例如「帮我生成一个海边日落的视频，5 秒，电影感，镜头缓慢推进」。
-3. 模型准备调用 `generateVideoClip` 时，消息流中出现 `TOOL_CONFIRM` 卡片，列出工具名与参数，本轮不返回最终回复。
-4. 点「允许执行」或「拒绝」，卡片状态更新，随后出现最终助手回复；点「允许」时当前工具仍是占位实现，不会真正生成视频。
-5. 卡片 `PENDING` 超过 `AGENTSCOPE_CONFIRM_TIMEOUT` 后确认会返回 `40900` 并标记失效；刷新页面可恢复卡片展示，后端重启后挂起记录丢失。
+1. 用户在 `/create` 输入视频提示词。
+2. Agent 调用 `proposeVideoPrompt`，返回原版提示词、优化版提示词和 3-5 条可展示的规划步骤；此时不会创建视频任务。
+3. 对话中的 `PROMPT_PROPOSAL` 卡片展示分析步骤、工具调用和两版提示词。
+4. 用户选择「使用优化版并生成」或「使用原版并生成」。
+5. 后端按选定提示词调用 `generateVideoClip`，创建并关联视频任务；对话卡片开始按秒计时。
+6. 已选择的方案不能重复提交。`generateVideoClip` 仍保留 AgentScope 权限规则，兼容其他直接工具调用入口。
+
+`generateVideoClip` 工具参数：
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `prompt` | 是 | 视频画面提示词 |
+| `style` | 否 | `cinematic` / `realistic` / `anime` / `cyberpunk` / `ink` |
+| `aspect` | 否 | `16:9` / `9:16` / `1:1` / `4:3` / `3:4` / `21:9` / `adaptive` |
+| `durationSeconds` | 否 | 4～30 秒 |
+| `resolution` | 否 | `480p` / `720p` / `1080p` |
+| `generateAudio` | 否 | 是否生成同步音频 |
+| `watermark` | 否 | 是否添加水印 |
+| `outputFormat` | 否 | `mp4` / `mov` |
+
+界面或 API 已提供的 `VideoGenerationParams` 优先；工具参数只补齐缺失字段。
 
 确认参数只提交 `approved`，服务端以挂起记录中的原始 `toolCalls` 为准。挂起状态保存在单实例内存，多实例部署需改用共享存储。
 
@@ -230,12 +253,12 @@ mvn test                                             # 测试（当前暂无用�
 
 ### 4.4 MinIO
 
-`storage` 包已定义 `ObjectStorageService` 接口与 MinIO 占位实现，但尚未写文件。接入时：
+`storage` 包已实现 MinIO 流式上传和预签名 URL。Seedance 成功后会在官方 24 小时链接过期前转存：
 
-1. 在 `MinioConfig` 中创建 `MinioClient`。
-2. 实现 bucket 初始化、上传、预签名 URL。
-3. 将视频结果写入对象存储后，把 `resultUrl` 替换为预签名地址。
-4. 不要把 AccessKey / SecretKey 写入代码或配置文件，继续走环境变量。
+1. 保持 MinIO endpoint 对浏览器可访问，或通过网关暴露。
+2. 不要把 AccessKey / SecretKey 写入代码或提交到仓库，继续使用环境变量。
+3. 预签名有效期由 `MINIO_PRESIGNED_TTL` 控制，默认 15 分钟。
+4. 已有数据库升级前执行 `backend/src/main/resources/db/seedance-upgrade.sql`。
 
 ## 5. 代码约定
 
@@ -354,7 +377,7 @@ Stop-Process -Id <pid>
 
 ### Q7. 视频任务一直 PENDING / RUNNING
 
-占位任务在内存线程池中推进，应用重启会中断。重新创建任务即可；生产接入时应改为持久化队列。
+视频任务由数据库状态和定时调度器持续推进，应用重启后会恢复轮询/转存；高并发场景可再升级为 Redis Stream / MQ。
 
 ## 8. 本地验收清单
 
@@ -364,11 +387,15 @@ Stop-Process -Id <pid>
 [ ] 前端 npm run dev 启动成功
 [ ] 首次访问门户 → 点击「立即开始」进入 /create，游客可直接输入提示词
 [ ] 游客点击「生成视频」→ 同页弹登录；关闭弹窗后草稿仍在，刷新后草稿仍可恢复
-[ ] 登录成功后自动继续生成 → 出现助手回复、分镜意图与生成卡片，进度推进到 100%
+[ ] 发送视频提示词后先出现 `PROMPT_PROPOSAL`，此时作品页没有新增视频任务
+[ ] 方案卡展示分析步骤、`proposeVideoPrompt` 和原版/优化版提示词
+[ ] 选择原版或优化版后才出现 `VIDEO_CARD`，参数与界面选择一致
+[ ] 视频卡片按秒计时，Seedance 状态通过 WebSocket 更新
 [ ] 已登录访问 / → 直接进入 /create；未登录访问 /works → 回到 /create 并弹出「登录后查看作品」
 [ ] 作品页展示生成记录，筛选、刷新、重试可用
 [ ] 刷新页面后历史消息仍存在
 [ ] 退出登录 → 回到门户
 [ ] npm run build / npm run lint 通过
+[ ] mvn test 通过
 [ ] mvn -DskipTests package 通过
 ```

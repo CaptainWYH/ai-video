@@ -4,6 +4,8 @@ import type {
   ChatSession,
   ConfirmToolCallPayload,
   SendMessagePayload,
+  PromptDecisionPayload,
+  PromptDecisionResponse,
   ToolConfirmResponse,
 } from '@/types/chat';
 import type { PageResult } from '@/types/common';
@@ -44,6 +46,14 @@ export const chatApi = {
   confirmToolCall(messageId: number, payload: ConfirmToolCallPayload) {
     return http<ToolConfirmResponse>({
       url: `/chat/messages/${messageId}/confirm`,
+      method: 'POST',
+      data: payload,
+    });
+  },
+
+  decidePrompt(messageId: number, payload: PromptDecisionPayload) {
+    return http<PromptDecisionResponse>({
+      url: `/chat/messages/${messageId}/prompt-decision`,
       method: 'POST',
       data: payload,
     });

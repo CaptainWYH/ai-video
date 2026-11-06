@@ -11,10 +11,15 @@ import com.aivideo.agent.AgentToolCall;
 import com.aivideo.agent.ModelErrorTranslator;
 import com.aivideo.agent.PendingConfirmation;
 import com.aivideo.agent.PendingConfirmationRegistry;
+import com.aivideo.agent.PromptProposal;
+import com.aivideo.agent.tools.VideoAssistantTools;
+import com.aivideo.agent.tools.VideoToolExecutionContext;
 import com.aivideo.chat.dto.ChatMessageResponse;
 import com.aivideo.chat.dto.ChatSessionResponse;
 import com.aivideo.chat.dto.ConfirmToolCallRequest;
 import com.aivideo.chat.dto.CreateSessionRequest;
+import com.aivideo.chat.dto.PromptDecisionRequest;
+import com.aivideo.chat.dto.PromptDecisionResponse;
 import com.aivideo.chat.dto.SendMessageRequest;
 import com.aivideo.chat.dto.ToolConfirmResponse;
 import com.aivideo.chat.entity.ChatMessage;
@@ -24,6 +29,9 @@ import com.aivideo.chat.mapper.ChatSessionMapper;
 import com.aivideo.chat.service.ChatService;
 import com.aivideo.common.BizException;
 import com.aivideo.common.PageResult;
+import com.aivideo.video.dto.VideoTaskResponse;
+import com.aivideo.video.dto.VideoGenerationParams;
+import com.aivideo.video.service.VideoGenerationService;
 import com.aivideo.websocket.ChatPushService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -67,6 +75,8 @@ public class ChatServiceImpl implements ChatService {
     private final ChatPushService chatPushService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
+    private final VideoGenerationService videoGenerationService;
+    private final VideoAssistantTools videoAssistantTools;
 
     @Override
     public ChatSessionResponse createSession(Long userId, CreateSessionRequest request) {
@@ -100,8 +110,11 @@ public class ChatServiceImpl implements ChatService {
                 .eq(ChatMessage::getSessionId, sessionId)
                 .orderByAsc(ChatMessage::getId);
         Page<ChatMessage> result = chatMessageMapper.selectPage(pageRequest, wrapper);
+        List<Long> messageIds = result.getRecords().stream().map(ChatMessage::getId).toList();
+        Map<Long, VideoTaskResponse> videoTasks = videoGenerationService
+                .findTasksForChatMessages(userId, messageIds);
         List<ChatMessageResponse> records = result.getRecords().stream()
-                .map(this::toResponse)
+                .map(message -> toResponse(message, videoTasks.get(message.getId())))
                 .toList();
         return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), records);
     }
@@ -117,7 +130,8 @@ public class ChatServiceImpl implements ChatService {
 
         // 模型调用在事务外，避免真实网络请求长时间占用数据库连接。
         AgentOutcome outcome = agentFactory.getAgent()
-                .chat(new AgentRequest(userId, session.getId(), request.getContent(), history));
+                .chat(new AgentRequest(userId, session.getId(), request.getContent(),
+                        history, request.getParams()));
 
         if (outcome instanceof AgentOutcome.AwaitingConfirmation awaiting) {
             return saveAwaitingConfirmation(userId, session, request, awaiting);
@@ -128,7 +142,8 @@ public class ChatServiceImpl implements ChatService {
         try {
             response = Objects.requireNonNull(transactionTemplate.execute(status -> {
                 insertUserMessage(userId, session.getId(), request.getContent());
-                ChatMessageResponse assistant = insertAssistantMessage(userId, session.getId(), reply);
+                ChatMessageResponse assistant = insertAssistantMessage(
+                        userId, session.getId(), reply, request.getContent(), request.getParams());
                 touchSession(session, request.getContent());
                 return assistant;
             }));
@@ -174,7 +189,7 @@ public class ChatServiceImpl implements ChatService {
         try {
             outcome = agentFactory.getAgent().confirm(new AgentConfirmRequest(
                     userId, confirmMessage.getSessionId(), pending.replyId(),
-                    pending.toolCalls(), approved));
+                    pending.toolCalls(), approved, pending.params()));
         } catch (BizException ex) {
             markConfirmationFailed(userId, confirmMessage, pending, requestId);
             throw ex;
@@ -193,7 +208,8 @@ public class ChatServiceImpl implements ChatService {
         ToolConfirmResponse response = Objects.requireNonNull(transactionTemplate.execute(status -> {
             ChatMessageResponse updated = updateConfirmStatus(confirmMessage, resultStatus);
             ChatMessageResponse replyResponse = insertAssistantMessage(
-                    userId, confirmMessage.getSessionId(), reply);
+                    userId, confirmMessage.getSessionId(), reply,
+                    videoPromptOf(pending.toolCalls(), "生成一个视频短片"), null);
             touchSession(confirmMessage.getSessionId());
             return ToolConfirmResponse.builder()
                     .confirmMessage(updated)
@@ -206,6 +222,59 @@ public class ChatServiceImpl implements ChatService {
                 resultStatus, pending.toolCalls());
         chatPushService.streamAssistantMessage(userId, confirmMessage.getSessionId(),
                 requestId, response.getReplyMessage());
+        return response;
+    }
+
+    @Override
+    public PromptDecisionResponse decidePrompt(Long userId, Long messageId,
+                                               PromptDecisionRequest request) {
+        ChatMessage proposalMessage = getOwnedMessage(userId, messageId);
+        if (!"PROMPT_PROPOSAL".equals(proposalMessage.getMessageType())) {
+            throw BizException.badRequest("该消息不是提示词优化方案");
+        }
+        PromptMetadata promptMetadata = parsePromptMetadata(proposalMessage.getMetadata());
+        if (!CONFIRM_STATUS_PENDING.equals(promptMetadata.status())) {
+            throw BizException.conflict("该提示词方案已处理");
+        }
+
+        boolean useOptimized = Boolean.TRUE.equals(request.getUseOptimizedPrompt());
+        String selectedPrompt = useOptimized
+                ? promptMetadata.proposal().optimizedPrompt()
+                : promptMetadata.proposal().originalPrompt();
+        VideoToolExecutionContext toolContext = new VideoToolExecutionContext(
+                userId,
+                proposalMessage.getSessionId(),
+                promptMetadata.params(),
+                "prompt:" + proposalMessage.getId());
+
+        PromptDecisionResponse response = Objects.requireNonNull(
+                transactionTemplate.execute(status -> {
+                    videoAssistantTools.generateVideoClip(
+                            selectedPrompt, null, null, null, null,
+                            null, null, null, toolContext);
+                    Long videoTaskId = toolContext.videoTaskId();
+                    if (videoTaskId == null) {
+                        throw new IllegalStateException("视频工具未返回任务 ID");
+                    }
+                    ChatMessageResponse updatedProposal =
+                            updatePromptDecision(proposalMessage, useOptimized, selectedPrompt);
+                    ChatMessageResponse videoMessage = insertAssistantMessage(
+                            userId,
+                            proposalMessage.getSessionId(),
+                            new AgentReply(
+                                    "已按确认后的提示词创建视频生成任务。",
+                                    true,
+                                    "generateVideoClip",
+                                    videoTaskId,
+                                    null),
+                            selectedPrompt,
+                            promptMetadata.params());
+                    touchSession(proposalMessage.getSessionId());
+                    return PromptDecisionResponse.builder()
+                            .proposalMessage(updatedProposal)
+                            .videoMessage(videoMessage)
+                            .build();
+                }));
         return response;
     }
 
@@ -241,7 +310,8 @@ public class ChatServiceImpl implements ChatService {
 
         pendingConfirmationRegistry.register(new PendingConfirmation(
                 confirmationId, userId, session.getId(), awaiting.replyId(),
-                awaiting.toolCalls(), response.getId(), pendingConfirmationRegistry.expiresAt()));
+                awaiting.toolCalls(), request.getParams(), response.getId(),
+                pendingConfirmationRegistry.expiresAt()));
 
         String requestId = resolveRequestId(request.getRequestId());
         chatPushService.pushToolConfirmRequired(userId, session.getId(), requestId, response);
@@ -286,7 +356,7 @@ public class ChatServiceImpl implements ChatService {
 
         pendingConfirmationRegistry.register(new PendingConfirmation(
                 newConfirmationId, userId, confirmMessage.getSessionId(), awaiting.replyId(),
-                awaiting.toolCalls(), response.getReplyMessage().getId(),
+                awaiting.toolCalls(), pending.params(), response.getReplyMessage().getId(),
                 pendingConfirmationRegistry.expiresAt()));
 
         chatPushService.pushToolConfirmResult(userId, confirmMessage.getSessionId(), requestId,
@@ -355,16 +425,51 @@ public class ChatServiceImpl implements ChatService {
         chatMessageMapper.insert(userMessage);
     }
 
-    private ChatMessageResponse insertAssistantMessage(Long userId, Long sessionId, AgentReply reply) {
+    private ChatMessageResponse insertAssistantMessage(Long userId, Long sessionId,
+                                                       AgentReply reply, String videoPrompt,
+                                                       VideoGenerationParams videoParams) {
         ChatMessage assistantMessage = new ChatMessage();
         assistantMessage.setSessionId(sessionId);
         assistantMessage.setUserId(userId);
         assistantMessage.setRole(ChatMessage.ROLE_ASSISTANT);
         assistantMessage.setContent(reply.content());
-        assistantMessage.setMessageType(reply.videoIntent() ? "VIDEO_CARD" : "TEXT");
-        assistantMessage.setMetadata(buildMetadata(reply));
+        assistantMessage.setMetadata(buildMetadata(reply, videoParams));
+        assistantMessage.setMessageType(
+                reply.promptProposal() != null
+                        ? "PROMPT_PROPOSAL"
+                        : reply.videoTaskId() != null ? "VIDEO_CARD" : "TEXT");
         chatMessageMapper.insert(assistantMessage);
-        return toResponse(assistantMessage);
+
+        VideoTaskResponse videoTask = null;
+        if (reply.videoTaskId() != null) {
+            videoTask = videoGenerationService.linkTaskToChat(
+                    userId, reply.videoTaskId(), sessionId, assistantMessage.getId());
+        }
+        if (videoTask == null
+                && !agentScopeProperties.isEnabled()
+                && reply.videoIntent()
+                && "generateVideoClip".equals(reply.toolName())) {
+            videoTask = videoGenerationService.createFromChat(
+                    userId,
+                    sessionId,
+                    assistantMessage.getId(),
+                    videoPrompt,
+                    videoParams,
+                    "chat:" + assistantMessage.getId());
+            assistantMessage.setMessageType("VIDEO_CARD");
+        }
+        if (videoTask == null) {
+            return toResponse(assistantMessage, null);
+        }
+        String metadata = appendMetadata(assistantMessage.getMetadata(), "videoTaskId", videoTask.getId());
+        ChatMessage patch = new ChatMessage();
+        patch.setId(assistantMessage.getId());
+        patch.setMetadata(metadata);
+        patch.setMessageType("VIDEO_CARD");
+        chatMessageMapper.updateById(patch);
+        assistantMessage.setMetadata(metadata);
+        assistantMessage.setMessageType("VIDEO_CARD");
+        return toResponse(assistantMessage, videoTask);
     }
 
     private void touchSession(ChatSession session, String titleSource) {
@@ -399,11 +504,38 @@ public class ChatServiceImpl implements ChatService {
         return toResponse(updated);
     }
 
-    private String buildMetadata(AgentReply reply) {
+    private ChatMessageResponse updatePromptDecision(ChatMessage proposalMessage,
+                                                     boolean useOptimized,
+                                                     String selectedPrompt) {
+        try {
+            ObjectNode node = StringUtils.hasText(proposalMessage.getMetadata())
+                    ? (ObjectNode) objectMapper.readTree(proposalMessage.getMetadata())
+                    : objectMapper.createObjectNode();
+            node.put("promptDecisionStatus", "SELECTED");
+            node.put("useOptimizedPrompt", useOptimized);
+            node.put("selectedPrompt", selectedPrompt);
+            ChatMessage patch = new ChatMessage();
+            patch.setId(proposalMessage.getId());
+            patch.setMetadata(objectMapper.writeValueAsString(node));
+            chatMessageMapper.updateById(patch);
+            ChatMessage updated = chatMessageMapper.selectById(proposalMessage.getId());
+            return toResponse(updated == null ? proposalMessage : updated);
+        } catch (Exception ex) {
+            throw new IllegalStateException("更新提示词选择状态失败", ex);
+        }
+    }
+
+    private String buildMetadata(AgentReply reply, VideoGenerationParams videoParams) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("videoIntent", reply.videoIntent());
         if (StringUtils.hasText(reply.toolName())) {
             metadata.put("toolName", reply.toolName());
+        }
+        if (reply.promptProposal() != null) {
+            metadata.put("promptProposal", reply.promptProposal());
+            metadata.put("promptDecisionStatus", "PENDING");
+            metadata.put("videoParams", videoParams == null
+                    ? VideoGenerationParams.defaults() : videoParams);
         }
         return writeMetadata(metadata);
     }
@@ -472,6 +604,29 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
+    private PromptMetadata parsePromptMetadata(String metadata) {
+        try {
+            JsonNode node = objectMapper.readTree(
+                    StringUtils.hasText(metadata) ? metadata : "{}");
+            JsonNode proposalNode = node.get("promptProposal");
+            if (proposalNode == null || proposalNode.isNull()) {
+                throw new IllegalArgumentException("缺少提示词优化方案");
+            }
+            PromptProposal proposal = objectMapper.treeToValue(
+                    proposalNode, PromptProposal.class);
+            JsonNode paramsNode = node.get("videoParams");
+            VideoGenerationParams params = paramsNode == null || paramsNode.isNull()
+                    ? VideoGenerationParams.defaults()
+                    : objectMapper.treeToValue(paramsNode, VideoGenerationParams.class);
+            return new PromptMetadata(
+                    proposal,
+                    params,
+                    textOf(node, "promptDecisionStatus"));
+        } catch (Exception ex) {
+            throw new IllegalStateException("提示词方案 metadata 解析失败", ex);
+        }
+    }
+
     private String textOf(JsonNode node, String field) {
         JsonNode value = node.get(field);
         return value == null || value.isNull() ? null : value.asText();
@@ -489,12 +644,17 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private ChatMessageResponse toResponse(ChatMessage message) {
+        return toResponse(message, null);
+    }
+
+    private ChatMessageResponse toResponse(ChatMessage message, VideoTaskResponse videoTask) {
         ChatMessageResponse.ChatMessageResponseBuilder builder = ChatMessageResponse.builder()
                 .id(message.getId())
                 .sessionId(message.getSessionId())
                 .role(message.getRole())
                 .content(message.getContent())
                 .messageType(message.getMessageType())
+                .videoTask(videoTask)
                 .createdAt(message.getCreatedAt());
 
         if (StringUtils.hasText(message.getMetadata())) {
@@ -526,6 +686,19 @@ public class ChatServiceImpl implements ChatService {
                             objectMapper.getTypeFactory()
                                     .constructCollectionType(List.class, AgentToolCall.class)));
                 }
+                JsonNode proposalNode = node.get("promptProposal");
+                if (proposalNode != null && !proposalNode.isNull()) {
+                    builder.promptProposal(objectMapper.treeToValue(
+                            proposalNode, PromptProposal.class));
+                }
+                String promptDecisionStatus = textOf(node, "promptDecisionStatus");
+                if (StringUtils.hasText(promptDecisionStatus)) {
+                    builder.promptDecisionStatus(promptDecisionStatus);
+                }
+                JsonNode useOptimized = node.get("useOptimizedPrompt");
+                if (useOptimized != null && !useOptimized.isNull()) {
+                    builder.useOptimizedPrompt(useOptimized.asBoolean());
+                }
             } catch (Exception ex) {
                 log.warn("消息 metadata 解析失败: {}", ex.getMessage());
             }
@@ -541,6 +714,31 @@ public class ChatServiceImpl implements ChatService {
         return normalized.substring(0, maxLength) + "…";
     }
 
+    private String appendMetadata(String metadata, String key, Object value) {
+        try {
+            ObjectNode node = StringUtils.hasText(metadata)
+                    ? (ObjectNode) objectMapper.readTree(metadata)
+                    : objectMapper.createObjectNode();
+            node.putPOJO(key, value);
+            return objectMapper.writeValueAsString(node);
+        } catch (Exception ex) {
+            throw new IllegalStateException("消息关联视频任务失败", ex);
+        }
+    }
+
+    private String videoPromptOf(List<AgentToolCall> toolCalls, String fallback) {
+        if (toolCalls != null) {
+            for (AgentToolCall toolCall : toolCalls) {
+                if ("generateVideoClip".equals(toolCall.name())
+                        && toolCall.input() != null
+                        && toolCall.input().get("prompt") != null) {
+                    return toolCall.input().get("prompt").toString();
+                }
+            }
+        }
+        return fallback;
+    }
+
     private long normalizePage(long page) {
         return Math.max(1, page);
     }
@@ -553,5 +751,11 @@ public class ChatServiceImpl implements ChatService {
                                    String replyId,
                                    String confirmStatus,
                                    List<AgentToolCall> toolCalls) {
+    }
+
+    private record PromptMetadata(
+            PromptProposal proposal,
+            VideoGenerationParams params,
+            String status) {
     }
 }

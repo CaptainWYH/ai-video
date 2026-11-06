@@ -1,5 +1,7 @@
 package com.aivideo.agent;
 
+import com.aivideo.video.dto.VideoGenerationParams;
+
 import java.util.List;
 
 /**
@@ -9,9 +11,11 @@ public record AgentConfirmRequest(Long userId,
                                   Long sessionId,
                                   String replyId,
                                   List<AgentToolCall> toolCalls,
-                                  boolean approved) {
+                                  boolean approved,
+                                  VideoGenerationParams params) {
 
     public AgentConfirmRequest {
         toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
+        params = params == null ? VideoGenerationParams.defaults() : params;
     }
 }

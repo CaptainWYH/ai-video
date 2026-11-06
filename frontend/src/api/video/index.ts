@@ -1,6 +1,6 @@
 import { http } from '@/api/request';
 import type { PageResult } from '@/types/common';
-import type { CreateVideoTaskPayload, VideoTask } from '@/types/video';
+import type { CreateVideoTaskPayload, VideoTask, VideoUsageSummary } from '@/types/video';
 
 export const videoApi = {
   createTask(payload: CreateVideoTaskPayload) {
@@ -23,6 +23,28 @@ export const videoApi = {
       url: '/video/tasks',
       method: 'GET',
       params: { page, size },
+    });
+  },
+
+  retryTask(taskId: number) {
+    return http<VideoTask>({
+      url: `/video/tasks/${taskId}/retry`,
+      method: 'POST',
+    });
+  },
+
+  cancelTask(taskId: number) {
+    return http<VideoTask>({
+      url: `/video/tasks/${taskId}`,
+      method: 'DELETE',
+    });
+  },
+
+  usageSummary(from?: string, to?: string) {
+    return http<VideoUsageSummary>({
+      url: '/video/usage/summary',
+      method: 'GET',
+      params: { from, to },
     });
   },
 };

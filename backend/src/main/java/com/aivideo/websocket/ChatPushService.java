@@ -2,6 +2,7 @@ package com.aivideo.websocket;
 
 import com.aivideo.agent.AgentToolCall;
 import com.aivideo.chat.dto.ChatMessageResponse;
+import com.aivideo.video.dto.VideoUsageResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -93,12 +94,22 @@ public class ChatPushService {
     /**
      * 推送视频任务进度事件。
      */
-    public void pushVideoProgress(Long userId, Long taskId, String status, int progress, String resultUrl) {
+    public void pushVideoProgress(Long userId,
+                                  Long taskId,
+                                  Long sessionId,
+                                  Long messageId,
+                                  String status,
+                                  Integer progress,
+                                  String resultUrl,
+                                  VideoUsageResponse usage) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("taskId", taskId);
+        data.put("sessionId", sessionId);
+        data.put("messageId", messageId);
         data.put("status", status);
         data.put("progress", progress);
         data.put("resultUrl", resultUrl);
+        data.put("usage", usage);
         send(userId, "video.progress", data);
     }
 
@@ -108,7 +119,7 @@ public class ChatPushService {
         event.put("data", data);
         try {
             String payload = objectMapper.writeValueAsString(event);
-            log.info("[WS 推送] userId={}, payload={}", userId, payload);
+            log.info("[WS 推送] userId={}, type={}", userId, type);
             for (WebSocketSession session : sessionRegistry.get(userId)) {
                 if (!session.isOpen()) {
                     continue;

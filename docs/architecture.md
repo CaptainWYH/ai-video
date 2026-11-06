@@ -26,7 +26,7 @@ flowchart LR
     Redis[("Redis")]
     MinIO[("MinIO / S3")]
     LLM["大模型（可选）"]
-    VideoProvider["视频生成服务（占位）"]
+    VideoProvider["Seedance / Mock 视频服务"]
 
     UI --> API
     Store --> API
@@ -48,7 +48,7 @@ flowchart LR
 
 设计原则：
 
-- **接口先于实现**：真实模型、视频生成、对象存储都通过接口隔离，骨架阶段提供 Mock / 占位实现。
+- **接口先于实现**：模型、视频服务、对象存储都通过接口隔离，支持 Mock 与真实实现切换。
 - **单一职责**：Controller 只做参数接收与响应包装，业务在 Service，Agent 调用通过工厂间接完成。
 - **可替换**：`TokenStore`、`ModelProvider`、`VideoGenerationService`、`ObjectStorageService` 都是可替换实现。
 - **安全默认**：所有业务接口需要 Bearer token，敏感配置来自环境变量。
@@ -119,7 +119,7 @@ sequenceDiagram
 - 点击「生成视频」、作品入口或登录时，`authGate` 记录 `reason`、当前草稿和挂起动作，并打开 `AuthModal`。
 - 登录或注册成功后 `completeGate` 执行挂起动作：生成流程会继续发送消息并创建视频任务，作品入口进入 `/works`。
 - 接口返回 401 且刷新失败时，清理 token 并跳到 `/create?auth=expired`，保留草稿并重新打开登录弹窗。
-- 会话消息与视频任务没有持久化关联字段，生成卡只保存在当前页面状态；刷新后可从 `/video/tasks` 恢复作品列表。
+- `PROMPT_PROPOSAL` 和 `VIDEO_CARD` 均持久化在聊天消息中；视频任务通过 `chat_session_id` / `chat_message_id` 关联，刷新可从历史恢复。
 
 ### 2.3 Axios 拦截器
 
@@ -150,8 +150,8 @@ com.aivideo
 ├── chat           会话、消息、ChatService、ChatController
 ├── agent          ChatAgent / ModelProvider / AgentScope 封装 / 工具
 ├── project        创作项目 CRUD
-├── video          视频任务、VideoGenerationService（占位）
-├── storage        ObjectStorageService（MinIO 占位）
+├── video          Seedance / Mock Provider、任务调度、MinIO 转存与计费快照
+├── storage        ObjectStorageService / MinIO
 └── websocket      握手拦截、连接注册表、推送服务
 ```
 
@@ -247,10 +247,13 @@ ChatService
 - 版本假设：当前基于 `io.agentscope:agentscope-core:2.0.2` 与 `agentscope-extensions-model-openai:2.0.2` 编译验证（Java 21）；升级 AgentScope 时需复核 `ReActAgent` / `Toolkit` / `ModelCreationContext` 的 API 签名。
 - 真实模型通过 `deepseek:` 前缀交给扩展模块的 `DeepSeekModelProvider`，自动处理 DeepSeek 的 formatter 与兼容细节；Key 来自 `DEEPSEEK_API_KEY`。
 - `VideoAssistantAgent` 的人格与模型由 `AgentScopeConfig` 创建，系统提示词可通过 `app.agentscope.sys-prompt` 调整。
-- 已注册两个占位工具：
+- 已注册三个工具：
   - `generateStoryboard`：生成分镜占位结果。
-  - `generateVideoClip`：生成视频片段占位结果。
+  - `proposeVideoPrompt`：生成原版/优化版提示词与可展示的规划步骤，不创建任务。
+  - `generateVideoClip`：参数包含 `prompt`、`style`、`aspect`、`durationSeconds`、`resolution`、`generateAudio`、`watermark`、`outputFormat`。用户确认后工具直接创建视频任务；`AgentScopeChatAgent` 通过 `RuntimeContext` 注入 `VideoToolExecutionContext`，工具从中获取 `userId`、`sessionId`、参数和幂等键，并把任务 ID 回传给 AgentReply。
+- 视频创作采用两阶段流程：Agent 先返回 `PROMPT_PROPOSAL`；用户选择原版或优化版后调用 `POST /chat/messages/{id}/prompt-decision`，此时才执行 `generateVideoClip` 并创建 `VIDEO_CARD`。
 - 真实模式优先从 AgentScope 的工具调用事件提取 `toolName`，事件缺失时才回退关键词识别（分镜 / 视频 / 镜头）；Mock 模式仍为关键词识别。
+- 工具创建的任务先保持 `PENDING` 且不提交；助手消息落库并完成 `chatMessageId` 关联后，调度器才会领取，避免对话保存失败产生计费孤儿任务。
 
 ### 3.4 WebSocket 协议
 
@@ -275,7 +278,7 @@ ChatService
 | `chat.done` | 一次回复结束 | `sessionId`、`requestId`、`message`（完整 `ChatMessageResponse`） |
 | `chat.tool_confirm_required` | 工具调用等待用户确认 | `sessionId`、`requestId`、`message`（`TOOL_CONFIRM` 卡片） |
 | `chat.tool_confirm_result` | 确认状态更新 | `sessionId`、`requestId`、`messageId`、`confirmationId`、`replyId`、`status`、`toolCalls` |
-| `video.progress` | 视频任务状态变化 | `taskId`、`status`、`progress`、`resultUrl` |
+| `video.progress` | 视频任务状态变化 | `taskId`、`sessionId`、`messageId`、`status`、`progress`、`resultUrl`、`usage` |
 | `pong` | 客户端发送 `ping` 后 | 无 |
 
 握手时解析 query 中的 token，校验 access 类型与黑名单，并将 `userId` / `username` 写入会话属性。每个用户可同时存在多个连接，推送时逐个发送并对 session 加锁。
@@ -285,23 +288,31 @@ ChatService
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING: POST /video/tasks
-    PENDING --> RUNNING: 异步任务启动
-    RUNNING --> RUNNING: progress 30 → 70
-    RUNNING --> SUCCESS: progress 100 + resultUrl
-    RUNNING --> FAILED: 异常（预留）
+    PENDING --> SUBMITTING: 调度器领取任务
+    SUBMITTING --> QUEUED: Seedance 返回任务 ID
+    QUEUED --> RUNNING: Seedance running
+    RUNNING --> DOWNLOADING: Seedance succeeded
+    DOWNLOADING --> SUCCESS: MinIO 转存完成
+    SUBMITTING --> PENDING: 可重试错误或限流
+    QUEUED --> CANCELLED: 取消排队任务
+    RUNNING --> FAILED
+    RUNNING --> EXPIRED
     SUCCESS --> [*]
     FAILED --> [*]
 ```
 
-- 创建任务时校验 `projectId` 归属，写入 `video_tasks`。
-- `videoTaskExecutor` 异步推进状态，并通过 WebSocket 推送 `video.progress`。
-- 当前结果 URL 固定为 `https://example.com/mock-video/{id}.mp4`。
-- 真实接入时替换 `VideoGenerationServiceImpl`，建议改为「提交厂商任务 → 入库外部任务 ID → 回调/轮询 → 更新状态」的持久化流程。
+- 创建任务时校验 `projectId` 归属，使用 `(user_id, client_request_id)` 幂等落库。
+- `VideoTaskWorker` 使用数据库状态、`next_poll_at`、`lease_until` 调度任务；应用重启后可继续处理。
+- `VideoGenerationProvider` 隔离 Mock 与 Seedance；Seedance 使用创建任务、查询任务和取消任务三类 REST 接口。
+- `SEEDANCE_STATUS_SYNC_MODE` 支持 `polling`、`callback`、`hybrid`。回调携带 HMAC 签名路径，后端立即响应后主动查询 Seedance，避免信任回调状态。
+- 成功后立即从官方临时 URL 流式下载到 MinIO；数据库保存 `storage_key`，展示时生成短期预签名地址。
+- 查询结果中的 `usage.completion_tokens` 与单价快照用于计算预估费用，并随 `video.progress` 推送到关联聊天卡片。
+- 聊天视频卡按任务 `createdAt` 在浏览器中每秒更新已等待秒数，不依赖后端伪造渲染百分比。
 
 ### 3.6 项目与对象存储
 
 - `Project` 保存名称、描述、剧本、分镜 JSON 字符串，当前由 REST CRUD 管理，前端尚未接入完整项目页。
-- `ObjectStorageService` 定义 `upload` / `presign` 能力；`MinioObjectStorageService` 为占位实现，不实际写入。
+- `ObjectStorageService` 提供流式 `upload` / `presign` 能力；`MinioObjectStorageService` 负责 bucket 初始化、视频写入和预签名。
 - 后续可把对话生成的分镜保存到 `storyboard`，视频任务通过 `projectId` 关联。
 
 ## 4. 数据模型
@@ -310,9 +321,9 @@ stateDiagram-v2
 | --- | --- | --- |
 | `users` | `username`、`email`、`password_hash`、`nickname`、`avatar_url`、`status` | 用户名与邮箱唯一 |
 | `chat_sessions` | `user_id`、`title`、`last_message_at` | 会话归属用户 |
-| `chat_messages` | `session_id`、`role`、`content`、`message_type`、`metadata` | `metadata` 保存 `videoIntent` / `toolName`；`TOOL_CONFIRM` 卡片额外保存 `confirmationId` / `replyId` / `toolCalls` / `confirmStatus` |
+| `chat_messages` | `session_id`、`role`、`content`、`message_type`、`metadata` | `PROMPT_PROPOSAL` 保存优化方案和选择状态；`VIDEO_CARD` 保存 `videoTaskId` |
 | `projects` | `user_id`、`name`、`description`、`script`、`storyboard` | 分镜暂存为 JSON 字符串 |
-| `video_tasks` | `user_id`、`project_id`、`prompt`、`params`、`status`、`progress`、`result_url` | 参数为 JSON 字符串 |
+| `video_tasks` | `provider_task_id`、`status`、`next_poll_at`、`lease_until`、`storage_key`、`completion_tokens`、`estimated_cost_cny` | 参数、服务商状态、聊天关联和计费快照 |
 
 所有表包含 `created_at`、`updated_at`、`deleted`（MyBatis-Plus 逻辑删除）。主键使用数据库自增，避免雪花 ID 在 JavaScript 中丢失精度。
 
@@ -323,6 +334,9 @@ stateDiagram-v2
 | 自增主键而非雪花 ID | 前端 `number` 精度安全，骨架阶段足够 |
 | 同步返回 + WebSocket 推流 | 即使实时连接不可用，也能保证消息最终展示 |
 | `requestId` 关联 | 解决 WS 分片、done 与 POST 响应之间的竞态 |
+| 数据库任务调度 | 比进程内线程池更可恢复，暂不引入 MQ |
+| 回调唤醒 + 主动查询 | 兼容本地不可回调，并防止伪造回调直接更新状态 |
+| token 单价快照 | 历史费用不会因后续调价而漂移 |
 | access + refresh 双 token | 缩短 access 生命周期，支持 refresh 旋转与主动登出 |
 | Agent 通过工厂获取 | ChatService 不依赖具体模型实现，便于切换 Mock / AgentScope |
 | dev profile 使用 H2 | 无 Docker 环境也能完成本地烟测，降低启动门槛 |
@@ -331,9 +345,9 @@ stateDiagram-v2
 ## 6. 已知边界
 
 - WebSocket 模拟流式输出是**发送完整消息后切片推送**，不是模型 token 级流式（真实 DeepSeek 模式同样如此）。
-- 意图识别仍基于关键词，真实工具调用结果尚未回传。
+- Mock 意图识别仍基于关键词；真实 Agent 优先读取工具调用事件。
 - 真实模型调用在事务外执行；失败时用户与助手消息均不落库，暂不做请求幂等。
-- 视频任务状态在内存异步线程中推进；应用重启后未完成任务不会自动恢复。
+- 视频队列目前由单实例数据库调度器承担；高并发时仍需升级到 Redis Stream / MQ 和分布式租约。
 - 工具确认的挂起状态仅存在于单实例内存（`PendingConfirmationRegistry`），后端重启、多实例或负载均衡到其他节点后确认会返回 `40900`；生产需改用 Redis 或共享 AgentState store + 粘性会话。
 - 确认接口同步执行 Agent 恢复调用，耗时受 `AGENTSCOPE_TIMEOUT` 约束；真实长耗时工具需改为异步任务。
 - 刷新 token 的白名单依赖 Redis；`memory` 模式不支持多实例。

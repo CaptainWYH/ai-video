@@ -1,20 +1,17 @@
 import { create } from 'zustand';
+import type { VideoGenerationParams } from '@/types/video';
 
 const DRAFT_STORAGE_KEY = 'aivideo.create.draft';
 const DRAFT_TTL = 24 * 60 * 60 * 1000;
 
-export interface DraftParams {
-  style: string;
-  aspect: string;
-  duration: number;
-  resolution: string;
-}
+export type DraftParams = VideoGenerationParams;
 
 export const DEFAULT_DRAFT_PARAMS: DraftParams = {
   style: 'cinematic',
   aspect: '16:9',
   duration: 5,
-  resolution: '1080p',
+  resolution: '720p',
+  generateAudio: true,
 };
 
 interface StoredDraft {

@@ -43,6 +43,7 @@ public class SecurityConfig {
             "/api/v1/auth/register",
             "/api/v1/auth/login",
             "/api/v1/auth/refresh",
+            "/api/v1/video/callbacks/seedance/**",
             "/ws/**",
             "/v3/api-docs/**",
             "/swagger-ui/**",

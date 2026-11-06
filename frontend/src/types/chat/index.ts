@@ -1,3 +1,5 @@
+import type { VideoGenerationParams, VideoTask, VideoUsage } from '@/types/video';
+
 export type ChatRole = 'USER' | 'ASSISTANT';
 
 export interface ChatSession {
@@ -15,6 +17,13 @@ export interface ToolCallInfo {
   input: Record<string, unknown>;
 }
 
+export interface PromptProposal {
+  originalPrompt: string;
+  optimizedPrompt: string;
+  analysisSteps: string[];
+  toolName: string;
+}
+
 export interface ChatMessage {
   id: number;
   sessionId: number;
@@ -27,6 +36,10 @@ export interface ChatMessage {
   replyId?: string | null;
   toolCalls?: ToolCallInfo[] | null;
   confirmStatus?: ConfirmStatus | null;
+  promptProposal?: PromptProposal | null;
+  promptDecisionStatus?: 'PENDING' | 'SELECTED' | null;
+  useOptimizedPrompt?: boolean | null;
+  videoTask?: VideoTask | null;
   createdAt: string;
 }
 
@@ -34,6 +47,7 @@ export interface SendMessagePayload {
   sessionId: number;
   content: string;
   requestId: string;
+  params?: VideoGenerationParams;
 }
 
 export interface WsEvent<T = unknown> {
@@ -55,9 +69,12 @@ export interface ChatDoneData {
 
 export interface VideoProgressData {
   taskId: number;
+  sessionId?: number | null;
+  messageId?: number | null;
   status: string;
-  progress: number;
+  progress?: number | null;
   resultUrl?: string | null;
+  usage?: VideoUsage | null;
 }
 
 export interface StreamingReply {
@@ -90,4 +107,13 @@ export interface ConfirmToolCallPayload {
 export interface ToolConfirmResponse {
   confirmMessage: ChatMessage;
   replyMessage: ChatMessage;
+}
+
+export interface PromptDecisionPayload {
+  useOptimizedPrompt: boolean;
+}
+
+export interface PromptDecisionResponse {
+  proposalMessage: ChatMessage;
+  videoMessage: ChatMessage;
 }

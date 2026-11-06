@@ -12,7 +12,7 @@
 | ID | 数据库自增 `Long`，前端按 `number` 处理 |
 | 接口文档 | Swagger UI `/swagger-ui.html`，OpenAPI `/v3/api-docs` |
 
-公开接口（无需 token）：`POST /auth/register`、`POST /auth/login`、`POST /auth/refresh`、`WS /ws/chat` 握手、Swagger、`/error`。其余接口均需登录。
+公开接口（无需 token）：`POST /auth/register`、`POST /auth/login`、`POST /auth/refresh`、`POST /video/callbacks/seedance/{taskId}/{signature}`、`WS /ws/chat` 握手、Swagger、`/error`。回调路径使用 HMAC 签名校验。其余接口均需登录。
 
 ## 2. 统一响应
 
@@ -167,6 +167,7 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 | GET | `/sessions?page=1&size=20` | 会话分页列表 |
 | GET | `/sessions/{id}/messages?page=1&size=100` | 会话历史消息分页 |
 | POST | `/messages` | 发送消息（同步返回 + WS 推流） |
+| POST | `/messages/{id}/prompt-decision` | 选择原版/优化版提示词并确认生成 |
 | POST | `/messages/{id}/confirm` | 处理工具调用确认并恢复 Agent |
 
 #### POST `/sessions`
@@ -202,7 +203,14 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 {
   "sessionId": 12,
   "content": "帮我生成一个海边日落主题的分镜脚本",
-  "requestId": "c1f5d3a8-..."
+  "requestId": "c1f5d3a8-...",
+  "params": {
+    "style": "cinematic",
+    "aspect": "16:9",
+    "duration": 5,
+    "resolution": "480p",
+    "generateAudio": true
+  }
 }
 ```
 
@@ -227,7 +235,49 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 }
 ```
 
-`messageType` 取值 `TEXT` / `VIDEO_CARD` / `TOOL_CONFIRM`；`videoIntent=true` 时前端展示视频占位卡片。首条消息会把会话标题更新为内容前 30 个字符。
+`messageType` 取值 `TEXT` / `PROMPT_PROPOSAL` / `VIDEO_CARD` / `TOOL_CONFIRM`。
+
+视频创作首先返回 `PROMPT_PROPOSAL`，不会创建视频任务：
+
+```json
+{
+  "id": 102,
+  "messageType": "PROMPT_PROPOSAL",
+  "promptDecisionStatus": "PENDING",
+  "promptProposal": {
+    "originalPrompt": "海边日落",
+    "optimizedPrompt": "黄金时刻的海边日落，低机位缓慢推进，海浪细节清晰，电影感暖色调",
+    "analysisSteps": ["识别主体与环境", "补充运镜和光线", "确认输出风格"],
+    "toolName": "proposeVideoPrompt"
+  },
+  "videoTask": null
+}
+```
+
+#### POST `/messages/{id}/prompt-decision`
+
+用于 `messageType=PROMPT_PROPOSAL` 且 `promptDecisionStatus=PENDING` 的消息。请求：
+
+```json
+{ "useOptimizedPrompt": true }
+```
+
+选择后才调用 `generateVideoClip` 并创建视频任务。返回更新后的方案消息和新的 `VIDEO_CARD`：
+
+```json
+{
+  "proposalMessage": {
+    "id": 102,
+    "promptDecisionStatus": "SELECTED",
+    "useOptimizedPrompt": true
+  },
+  "videoMessage": {
+    "id": 103,
+    "messageType": "VIDEO_CARD",
+    "videoTask": { "id": 7, "status": "PENDING" }
+  }
+}
+```
 
 当真实 Agent 准备调用需要确认的工具（当前为 `generateVideoClip`）时，本轮不返回最终回复，而是同步返回一条 `TOOL_CONFIRM` 消息，并额外携带：
 
@@ -284,9 +334,12 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/tasks` | 创建视频生成任务（占位） |
+| POST | `/tasks` | 创建 Mock / Seedance 异步视频任务 |
 | GET | `/tasks/{id}` | 查询任务状态 |
 | GET | `/tasks?page=1&size=20` | 任务分页列表 |
+| POST | `/tasks/{id}/retry` | 基于原提示词和参数重新创建任务 |
+| DELETE | `/tasks/{id}` | 取消 `PENDING` / `QUEUED` 任务 |
+| GET | `/usage/summary?from=2026-11-01&to=2026-11-30` | token 与预估费用汇总 |
 
 #### POST `/tasks`
 
@@ -296,17 +349,33 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
   "params": {
     "style": "cinematic",
     "duration": 5,
-    "resolution": "1080p"
+    "resolution": "720p",
+    "ratio": "16:9",
+    "generateAudio": true
   },
-  "projectId": null
+  "projectId": null,
+  "clientRequestId": "c1f5d3a8-..."
 }
 ```
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `prompt` | 是 | 1-2000 字符 |
-| `params` | 否 | 原样透传并持久化为 JSON，常用 `style` / `duration` / `resolution` |
+| `params` | 否 | 规范化为 `style` / `duration` / `resolution` / `ratio` / `generateAudio` |
 | `projectId` | 否 | 关联项目，必须属于当前用户 |
+| `clientRequestId` | 否 | 幂等键，同用户重复请求返回同一任务 |
+
+`params` 使用固定字段 `VideoGenerationParams`，不再接受任意键值：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `style` | string | `cinematic` | `cinematic` / `realistic` / `anime` / `cyberpunk` / `ink` |
+| `aspect` | string | `16:9` | `16:9` / `9:16` / `1:1` / `4:3` / `3:4` / `21:9` / `adaptive` |
+| `duration` | integer | `5` | 4～30 秒 |
+| `resolution` | string | `720p` | `480p` / `720p` / `1080p` |
+| `generateAudio` | boolean | `true` | 是否生成同步音频 |
+| `watermark` | boolean | `false` | 是否生成水印 |
+| `outputFormat` | string | `mp4` | `mp4` / `mov` |
 
 返回 `VideoTaskResponse`：
 
@@ -315,17 +384,25 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
   "id": 7,
   "projectId": null,
   "prompt": "夕阳下的海边……",
-  "params": { "style": "cinematic", "duration": 5, "resolution": "1080p" },
+  "params": { "style": "cinematic", "duration": 5, "resolution": "720p" },
   "status": "PENDING",
   "progress": 0,
+  "provider": "SEEDANCE",
+  "providerModel": "doubao-seedance-2-5-260628",
+  "providerStatus": null,
   "resultUrl": null,
   "errorMessage": null,
+  "usage": null,
   "createdAt": "2026-10-27T14:32:00",
   "updatedAt": "2026-10-27T14:32:00"
 }
 ```
 
-`status`：`PENDING` / `RUNNING` / `SUCCESS` / `FAILED`。占位实现会在数秒内推进到 `SUCCESS`，`resultUrl` 为 `https://example.com/mock-video/{id}.mp4`。
+`status`：`PENDING` / `SUBMITTING` / `QUEUED` / `RUNNING` / `DOWNLOADING` / `SUCCESS` / `FAILED` / `CANCELLED` / `EXPIRED`。
+
+Seedance 成功后先下载到 MinIO，再返回短期预签名 `resultUrl`。`usage` 包含 `completionTokens`、`totalTokens`、单价快照 `unitPriceCnyPerMillion`、`estimatedCostCny` 和 `currency`。费用为按官方 token 单价计算的预估值，最终以火山引擎账单为准。
+
+回调路径 `POST /video/callbacks/seedance/{taskId}/{signature}` 不需要 JWT。签名基于 `taskId + SEEDANCE_CALLBACK_SECRET` 生成；服务端收到后立即响应，再通过查询任务 API 获取可信状态。
 
 #### GET `/tasks/{id}`
 
@@ -382,7 +459,7 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 | `chat.done` | 回复完成 | `sessionId`、`requestId`、`message` |
 | `chat.tool_confirm_required` | 工具调用等待用户确认 | `sessionId`、`requestId`、`message`（`TOOL_CONFIRM` 卡片） |
 | `chat.tool_confirm_result` | 工具确认状态更新 | `sessionId`、`requestId`、`messageId`、`confirmationId`、`replyId`、`status`、`toolCalls` |
-| `video.progress` | 视频任务状态更新 | `taskId`、`status`、`progress`、`resultUrl` |
+| `video.progress` | 视频任务状态更新 | `taskId`、`sessionId`、`messageId`、`status`、`progress`、`resultUrl`、`usage` |
 | `pong` | 心跳响应 | `null` |
 
 说明：
@@ -390,6 +467,7 @@ HTTP 状态码与业务错误码对应；前端同时检查 HTTP 状态与 `code
 - 当前 `chat.chunk` 是完整回复的切片（每片 6 个字符，间隔 40ms），不是模型 token 级流式；Mock 与真实 DeepSeek 模式均如此。
 - 若客户端离线，后端直接跳过推送；REST 接口仍会返回完整消息。
 - 前端在收到 `chat.done` 后结束占位气泡；若 5 秒内未收到，则以 POST 返回结果兜底。
+- 视频状态变更会关联到对应 `VIDEO_CARD` 消息；WebSocket 断线时通过 REST 轮询和历史消息恢复。
 - 工具确认挂起时只发送 `chat.tool_confirm_required`，不发送 `chat.done`；用户确认后如果 Agent 完成，仍以 `chat.chunk` + `chat.done` 推送最终回复，并先发送 `chat.tool_confirm_result` 更新卡片状态。
 - 挂起状态保存在单实例内存中，后端重启或多实例切换后确认会返回 `40900`；刷新页面可从历史消息恢复卡片展示。
 
@@ -424,11 +502,11 @@ curl -X POST http://localhost:8080/api/v1/chat/sessions \
 curl -X POST http://localhost:8080/api/v1/chat/messages \
   -H "Authorization: Bearer <accessToken>" \
   -H "Content-Type: application/json" \
-  -d '{"sessionId":1,"content":"帮我生成海边日落的分镜","requestId":"demo-request-1"}'
+  -d '{"sessionId":1,"content":"帮我生成海边日落的分镜","requestId":"demo-request-1","params":{"duration":5,"resolution":"720p","generateAudio":true}}'
 
 # 创建视频任务
 curl -X POST http://localhost:8080/api/v1/video/tasks \
   -H "Authorization: Bearer <accessToken>" \
   -H "Content-Type: application/json" \
-  -d '{"prompt":"夕阳下的海边，电影感","params":{"duration":5,"resolution":"1080p"}}'
+  -d '{"prompt":"夕阳下的海边，电影感","params":{"duration":5,"resolution":"720p","ratio":"16:9"},"clientRequestId":"demo-video-1"}'
 ```

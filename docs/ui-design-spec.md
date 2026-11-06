@@ -980,10 +980,10 @@ P0 不改后端的编排方式：
 
 需要明确的限制：
 
-- `/chat/messages` 当前不接收风格、比例、时长；P0 的参数只用于 `/video/tasks`。
-- 会话消息与视频任务没有持久化关联字段；P0 生成卡只在当前页面维护，刷新后从 `/video/tasks` 恢复作品，不保证在会话中还原同一张卡。
+- `/chat/messages` 已接收强类型 `VideoGenerationParams`，包含风格、比例、时长、分辨率、声音和水印；界面参数优先于模型工具参数。
+- 会话消息与视频任务已通过 `chat_session_id` / `chat_message_id` 持久化关联，刷新后可以恢复 `PROMPT_PROPOSAL` 和 `VIDEO_CARD`。
 - P1 建议增加 `creation` 聚合接口或在消息 `metadata` 中保存 `videoTaskId`，让会话与作品形成稳定关联。
-- 真实视频生成未接入，结果链接是占位地址；界面必须标注「示例结果」。
+- Mock 模式的视频结果使用示例地址并标注「示例结果」；Seedance 模式展示持久化后的真实视频。
 
 ### 9.5 分阶段
 

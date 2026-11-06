@@ -4,6 +4,8 @@ import com.aivideo.chat.dto.ChatMessageResponse;
 import com.aivideo.chat.dto.ChatSessionResponse;
 import com.aivideo.chat.dto.ConfirmToolCallRequest;
 import com.aivideo.chat.dto.CreateSessionRequest;
+import com.aivideo.chat.dto.PromptDecisionRequest;
+import com.aivideo.chat.dto.PromptDecisionResponse;
 import com.aivideo.chat.dto.SendMessageRequest;
 import com.aivideo.chat.dto.ToolConfirmResponse;
 import com.aivideo.common.PageResult;
@@ -22,4 +24,6 @@ public interface ChatService {
      * 处理工具调用确认，并恢复暂停的 Agent。
      */
     ToolConfirmResponse confirmToolCall(Long userId, Long messageId, ConfirmToolCallRequest request);
+
+    PromptDecisionResponse decidePrompt(Long userId, Long messageId, PromptDecisionRequest request);
 }

@@ -24,6 +24,7 @@
         <springdoc.version>2.6.0</springdoc.version>
         <agentscope.version>2.0.2</agentscope.version>
         <druid.version>1.2.24</druid.version>
+        <minio.version>8.5.17</minio.version>
     </properties>
 
     <dependencies>
@@ -116,6 +117,13 @@
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-extensions-model-openai</artifactId>
             <version>${agentscope.version}</version>
+        </dependency>
+
+        <!-- MinIO：持久化 Seedance 24 小时临时视频产物 -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>${minio.version}</version>
         </dependency>
 
         <!-- Lombok -->

@@ -6,7 +6,9 @@ import type {
   StreamingReply,
   ToolConfirmRequiredData,
   ToolConfirmResultData,
+  VideoProgressData,
 } from '@/types/chat';
+import type { VideoGenerationParams, VideoTaskStatus } from '@/types/video';
 
 const fallbackTimers = new Map<string, number>();
 
@@ -27,18 +29,24 @@ interface ChatState {
   streaming: StreamingReply | null;
   socketConnected: boolean;
   confirmingMessageId: number | null;
+  decidingPromptMessageId: number | null;
 
   setSocketConnected: (connected: boolean) => void;
   loadSessions: (autoSelect?: boolean) => Promise<void>;
   createSession: () => Promise<ChatSession>;
   selectSession: (sessionId: number) => Promise<void>;
-  sendMessage: (content: string) => Promise<ChatMessage | null>;
+  sendMessage: (
+    content: string,
+    params?: VideoGenerationParams,
+  ) => Promise<ChatMessage | null>;
   appendChunk: (sessionId: number, requestId: string, delta: string) => void;
   finishStreaming: (sessionId: number, requestId: string, reply: ChatMessage) => void;
   upsertMessage: (message: ChatMessage) => void;
   handleToolConfirmRequired: (data: ToolConfirmRequiredData) => void;
   handleToolConfirmResult: (data: ToolConfirmResultData) => void;
+  handleVideoProgress: (data: VideoProgressData) => void;
   confirmToolCall: (messageId: number, approved: boolean) => Promise<ChatMessage | null>;
+  decidePrompt: (messageId: number, useOptimizedPrompt: boolean) => Promise<ChatMessage | null>;
   reset: () => void;
 }
 
@@ -51,6 +59,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   streaming: null,
   socketConnected: false,
   confirmingMessageId: null,
+  decidingPromptMessageId: null,
 
   setSocketConnected: (connected) => set({ socketConnected: connected }),
 
@@ -101,7 +110,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
   },
 
-  sendMessage: async (content) => {
+  sendMessage: async (content, params) => {
     const trimmed = content.trim();
     if (!trimmed) {
       return null;
@@ -134,6 +143,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         sessionId: targetSessionId,
         content: trimmed,
         requestId,
+        params,
       });
 
       if (reply.messageType === 'TOOL_CONFIRM') {
@@ -253,6 +263,29 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }));
   },
 
+  handleVideoProgress: (data) => {
+    if (data.sessionId && get().activeSessionId !== data.sessionId) {
+      return;
+    }
+    set((state) => ({
+      messages: state.messages.map((message) => {
+        if (message.videoTask?.id !== data.taskId) {
+          return message;
+        }
+        return {
+          ...message,
+          videoTask: {
+            ...message.videoTask,
+            status: data.status as VideoTaskStatus,
+            progress: data.progress ?? message.videoTask.progress,
+            resultUrl: data.resultUrl ?? message.videoTask.resultUrl,
+            usage: data.usage ?? message.videoTask.usage,
+          },
+        };
+      }),
+    }));
+  },
+
   confirmToolCall: async (messageId, approved) => {
     const message = get().messages.find((item) => item.id === messageId);
     if (!message) {
@@ -294,6 +327,19 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
   },
 
+  decidePrompt: async (messageId, useOptimizedPrompt) => {
+    set({ decidingPromptMessageId: messageId });
+    try {
+      const response = await chatApi.decidePrompt(messageId, { useOptimizedPrompt });
+      get().upsertMessage(response.proposalMessage);
+      get().upsertMessage(response.videoMessage);
+      void get().loadSessions(false);
+      return response.videoMessage;
+    } finally {
+      set({ decidingPromptMessageId: null });
+    }
+  },
+
   reset: () => {
     fallbackTimers.forEach((timer) => window.clearTimeout(timer));
     fallbackTimers.clear();
@@ -306,6 +352,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       streaming: null,
       socketConnected: false,
       confirmingMessageId: null,
+      decidingPromptMessageId: null,
     });
   },
 }));

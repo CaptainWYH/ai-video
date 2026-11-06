@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import WorkCard from '@/components/works/WorkCard';
 import { videoApi } from '@/api/video';
 import { getErrorMessage } from '@/utils/error';
-import type { VideoTask } from '@/types/video';
+import type { VideoTask, VideoUsageSummary } from '@/types/video';
 
 type WorkFilter = 'ALL' | 'ACTIVE' | 'SUCCESS' | 'FAILED';
 
@@ -21,7 +21,7 @@ function matchesFilter(task: VideoTask, filter: WorkFilter): boolean {
     return true;
   }
   if (filter === 'ACTIVE') {
-    return task.status === 'PENDING' || task.status === 'RUNNING';
+    return ['PENDING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(task.status);
   }
   return task.status === filter;
 }
@@ -29,6 +29,7 @@ function matchesFilter(task: VideoTask, filter: WorkFilter): boolean {
 export default function WorksPage() {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<VideoTask[]>([]);
+  const [usage, setUsage] = useState<VideoUsageSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<WorkFilter>('ALL');
 
@@ -37,8 +38,12 @@ export default function WorksPage() {
       setLoading(true);
     }
     try {
-      const result = await videoApi.listTasks(1, 100);
+      const [result, summary] = await Promise.all([
+        videoApi.listTasks(1, 100),
+        videoApi.usageSummary(),
+      ]);
       setTasks(result.records);
+      setUsage(summary);
     } catch (error) {
       if (!silent) {
         message.error(getErrorMessage(error));
@@ -55,7 +60,8 @@ export default function WorksPage() {
   }, [loadTasks]);
 
   const hasActiveTask = tasks.some(
-    (task) => task.status === 'PENDING' || task.status === 'RUNNING',
+    (task) =>
+      ['PENDING', 'SUBMITTING', 'QUEUED', 'RUNNING', 'DOWNLOADING'].includes(task.status),
   );
 
   useEffect(() => {
@@ -70,8 +76,18 @@ export default function WorksPage() {
 
   const handleRetry = async (task: VideoTask) => {
     try {
-      await videoApi.createTask({ prompt: task.prompt, params: task.params });
+      await videoApi.retryTask(task.id);
       message.success('已重新提交生成');
+      await loadTasks(true);
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const handleCancel = async (task: VideoTask) => {
+    try {
+      await videoApi.cancelTask(task.id);
+      message.success('已取消视频任务');
       await loadTasks(true);
     } catch (error) {
       message.error(getErrorMessage(error));
@@ -97,6 +113,13 @@ export default function WorksPage() {
           </div>
           <h1>我的作品</h1>
           <p>每一次生成都留下记录。提示词、参数和结果都在这里。</p>
+          {usage ? (
+            <div className="works-usage">
+              <span>{usage.taskCount} 个任务</span>
+              <span>{usage.completionTokens.toLocaleString()} token</span>
+              <span>预估 ¥{Number(usage.estimatedCostCny).toFixed(4)}</span>
+            </div>
+          ) : null}
         </div>
         <div className="works-hero-actions">
           <Button
@@ -165,7 +188,12 @@ export default function WorksPage() {
       ) : (
         <div className="works-grid">
           {visibleTasks.map((task) => (
-            <WorkCard key={task.id} task={task} onRetry={handleRetry} />
+            <WorkCard
+              key={task.id}
+              task={task}
+              onRetry={handleRetry}
+              onCancel={handleCancel}
+            />
           ))}
         </div>
       )}

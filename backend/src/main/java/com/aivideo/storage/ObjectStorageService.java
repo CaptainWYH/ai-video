@@ -1,5 +1,7 @@
 package com.aivideo.storage;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.time.Duration;
 
 /**
@@ -7,11 +9,11 @@ import java.time.Duration;
  */
 public interface ObjectStorageService {
 
-    /**
-     * 上传对象并返回可访问 URL。
-     * TODO: 当前为占位实现，不会真正写入文件。
-     */
-    String upload(byte[] content, String objectKey, String contentType);
+    String upload(InputStream content, long contentLength, String objectKey, String contentType);
+
+    default String upload(byte[] content, String objectKey, String contentType) {
+        return upload(new ByteArrayInputStream(content), content.length, objectKey, contentType);
+    }
 
     /**
      * 生成预签名访问 URL。

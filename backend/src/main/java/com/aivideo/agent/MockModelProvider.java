@@ -1,12 +1,13 @@
 package com.aivideo.agent;
 
+import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
  * Mock 模型实现：不发起任何网络请求，返回固定格式的模拟回复。
  *
- * <p>TODO: 接入真实模型（AgentScope Model / 自有推理服务），保留视频意图识别与工具调用元数据。</p>
+ * <p>真实 AgentScope 模式由 {@link AgentScopeChatAgent} 提供。</p>
  */
 @Component
 @ConditionalOnProperty(name = "app.agentscope.enabled", havingValue = "false", matchIfMissing = true)
@@ -19,20 +20,42 @@ public class MockModelProvider implements ModelProvider {
         String excerpt = content.length() > 60 ? content.substring(0, 60) + "…" : content;
 
         if (toolName != null) {
+            if ("generateVideoClip".equals(toolName)) {
+                PromptProposal proposal = new PromptProposal(
+                        content,
+                        content + "。补充明确的镜头运动、主体动作、环境光线和电影感画面细节。",
+                        List.of(
+                                "理解用户的主体、场景和画面目标",
+                                "补充运镜、光线、动作和视觉风格",
+                                "保留用户原意并形成可执行提示词"),
+                        "proposeVideoPrompt");
+                return new AgentReply(
+                        "（Mock 模式）我已整理出一版更完整的视频提示词，请选择原版或优化版后确认生成。",
+                        false,
+                        "proposeVideoPrompt",
+                        null,
+                        proposal);
+            }
             return new AgentReply(
                     "（Mock 模式）我理解你的创作需求：「" + excerpt + "」。\n\n"
                             + "我会先拆解剧本结构，并调用 " + toolName + " 生成占位分镜/镜头参数。"
-                            + "当前视频生成能力仍在开发中，真实模型与视频渲染接口尚未接入。",
-                    true,
-                    toolName);
+                            + ("generateVideoClip".equals(toolName)
+                            ? "视频任务将在本轮回复后提交。"
+                            : "分镜结果会用于后续视频创作。"),
+                    "generateVideoClip".equals(toolName),
+                    toolName,
+                    null,
+                    null);
         }
 
         return new AgentReply(
                 "（Mock 模式）你好，我是 AI 视频创作助手。你可以告诉我视频主题、风格、时长或分镜想法，"
                         + "我会帮你整理成可执行的创作方案。\n\n"
                         + "当前收到：「" + excerpt + "」\n"
-                        + "提示：本阶段为占位实现，真实模型与视频生成能力尚未接入。",
+                        + "提示：当前为 Mock 对话模式；视频服务按 VIDEO_PROVIDER 配置执行。",
                 false,
+                null,
+                null,
                 null);
     }
 

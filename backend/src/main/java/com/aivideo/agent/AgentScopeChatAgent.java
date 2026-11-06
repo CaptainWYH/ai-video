@@ -10,15 +10,22 @@ import io.agentscope.core.event.ConfirmResult;
 import io.agentscope.core.event.RequireUserConfirmEvent;
 import io.agentscope.core.event.ToolCallEndEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
+import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.message.UserMessage;
 import io.agentscope.core.permission.PermissionContextState;
+import io.agentscope.core.util.JsonUtils;
+import com.aivideo.agent.tools.VideoToolExecutionContext;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -30,6 +37,7 @@ import java.util.Map;
  * {@link Msg#METADATA_CONFIRM_RESULTS} 在同一 RuntimeContext 槽位上恢复执行。</p>
  */
 @Component
+@Slf4j
 @RequiredArgsConstructor
 @ConditionalOnProperty(name = "app.agentscope.enabled", havingValue = "true")
 public class AgentScopeChatAgent implements ChatAgent {
@@ -42,9 +50,12 @@ public class AgentScopeChatAgent implements ChatAgent {
     public AgentOutcome chat(AgentRequest request) {
         String userId = String.valueOf(request.userId());
         String sessionId = String.valueOf(request.sessionId());
+        VideoToolExecutionContext toolContext = new VideoToolExecutionContext(
+                request.userId(), request.sessionId(), request.params());
         RuntimeContext context = RuntimeContext.builder()
                 .userId(userId)
                 .sessionId(sessionId)
+                .put(VideoToolExecutionContext.class, toolContext)
                 .build();
         installPermissionContext(userId, sessionId);
 
@@ -54,21 +65,27 @@ public class AgentScopeChatAgent implements ChatAgent {
                 request.content(),
                 List.of(),
                 false,
-                false);
+                false,
+                toolContext);
     }
 
     @Override
     public AgentOutcome confirm(AgentConfirmRequest request) {
         String userId = String.valueOf(request.userId());
         String sessionId = String.valueOf(request.sessionId());
+        VideoToolExecutionContext toolContext = new VideoToolExecutionContext(
+                request.userId(), request.sessionId(), request.params());
         RuntimeContext context = RuntimeContext.builder()
                 .userId(userId)
                 .sessionId(sessionId)
+                .put(VideoToolExecutionContext.class, toolContext)
                 .build();
         installPermissionContext(userId, sessionId);
 
         List<ConfirmResult> results = request.toolCalls().stream()
-                .map(toolCall -> new ConfirmResult(request.approved(), toToolUseBlock(toolCall)))
+                .map(toolCall -> new ConfirmResult(
+                        request.approved(),
+                        toToolUseBlock(alignVideoToolCall(toolCall, toolContext))))
                 .toList();
         Msg confirmMessage = UserMessage.builder()
                 .metadata(Map.of(Msg.METADATA_CONFIRM_RESULTS, results))
@@ -80,7 +97,8 @@ public class AgentScopeChatAgent implements ChatAgent {
                 "",
                 request.toolCalls(),
                 request.approved(),
-                true);
+                true,
+                toolContext);
     }
 
     @Override
@@ -93,7 +111,8 @@ public class AgentScopeChatAgent implements ChatAgent {
                                 String originalContent,
                                 List<AgentToolCall> submittedToolCalls,
                                 boolean approved,
-                                boolean fromConfirm) {
+                                boolean fromConfirm,
+                                VideoToolExecutionContext toolContext) {
         try {
             // 必须消费到 onComplete，避免提前取消导致 AgentState 未保存。
             List<AgentEvent> events = videoAssistantAgent
@@ -104,12 +123,15 @@ public class AgentScopeChatAgent implements ChatAgent {
             if (events == null) {
                 throw new BizException(ResultCode.MODEL_UNAVAILABLE, "模型未返回事件流，请重试");
             }
+            logToolFailures(events, context.getUserId(), context.getSessionId());
 
             String resultText = lastResultText(events);
             RequireUserConfirmEvent confirmEvent = lastConfirmEvent(events);
             if (confirmEvent != null && !confirmEvent.getToolCalls().isEmpty()) {
                 List<AgentToolCall> pending = confirmEvent.getToolCalls().stream()
-                        .map(block -> new AgentToolCall(block.getId(), block.getName(), block.getInput()))
+                        .map(block -> alignVideoToolCall(
+                                new AgentToolCall(block.getId(), block.getName(), block.getInput()),
+                                toolContext))
                         .toList();
                 return new AgentOutcome.AwaitingConfirmation(
                         confirmEvent.getReplyId(), pending, resultText);
@@ -122,13 +144,19 @@ public class AgentScopeChatAgent implements ChatAgent {
                     throw new BizException(ResultCode.MODEL_UNAVAILABLE, "模型未返回有效回复，请重试");
                 }
                 text = approved
-                        ? "工具调用已完成（当前为占位实现）。"
+                        ? "视频生成参数已确认，系统将创建异步任务。"
                         : "已拒绝工具调用，未执行该操作。";
             }
 
-            // 确认恢复后的回复不再触发前端的旧视频任务自动生成。
-            boolean videoIntent = !fromConfirm && StringUtils.hasText(toolName);
-            return new AgentOutcome.Completed(new AgentReply(text, videoIntent, toolName));
+            // 任务由 generateVideoClip 工具直接创建；这里只把任务 ID 带回 ChatService。
+            boolean videoIntent = "generateVideoClip".equals(toolName);
+            return new AgentOutcome.Completed(
+                    new AgentReply(
+                            text,
+                            videoIntent,
+                            toolName,
+                            toolContext.videoTaskId(),
+                            toolContext.promptProposal()));
         } catch (BizException ex) {
             throw ex;
         } catch (IllegalStateException ex) {
@@ -189,13 +217,51 @@ public class AgentScopeChatAgent implements ChatAgent {
         return detectTool(originalContent);
     }
 
-    private ToolUseBlock toToolUseBlock(AgentToolCall toolCall) {
-        // 必须原样保留 id/name/input：恢复时 AgentScope 会用它替换 context 中的原始 block。
+    static ToolUseBlock toToolUseBlock(AgentToolCall toolCall) {
+        // AgentScope 的 schema 校验读取 content，而不只是读取 input。
         return ToolUseBlock.builder()
                 .id(toolCall.id())
                 .name(toolCall.name())
                 .input(toolCall.input())
+                .content(JsonUtils.getJsonCodec().toJson(toolCall.input()))
                 .build();
+    }
+
+    static AgentToolCall alignVideoToolCall(
+            AgentToolCall toolCall, VideoToolExecutionContext context) {
+        if (!"generateVideoClip".equals(toolCall.name())) {
+            return toolCall;
+        }
+        Map<String, Object> input = new LinkedHashMap<>(toolCall.input());
+        input.put("style", context.params().style());
+        input.put("aspect", context.params().aspect());
+        input.put("durationSeconds", context.params().duration());
+        input.put("resolution", context.params().resolution());
+        input.put("generateAudio", context.params().generateAudio());
+        input.put("watermark", context.params().watermark());
+        input.put("outputFormat", context.params().outputFormat());
+        return new AgentToolCall(toolCall.id(), toolCall.name(), input);
+    }
+
+    private void logToolFailures(List<AgentEvent> events, String userId, String sessionId) {
+        Map<String, StringBuilder> errorTexts = new java.util.HashMap<>();
+        events.stream()
+                .filter(ToolResultTextDeltaEvent.class::isInstance)
+                .map(ToolResultTextDeltaEvent.class::cast)
+                .forEach(event -> errorTexts
+                        .computeIfAbsent(event.getToolCallId(), ignored -> new StringBuilder())
+                        .append(event.getDelta() == null ? "" : event.getDelta()));
+        events.stream()
+                .filter(ToolResultEndEvent.class::isInstance)
+                .map(ToolResultEndEvent.class::cast)
+                .filter(event -> event.getState() == ToolResultState.ERROR)
+                .forEach(event -> log.warn(
+                        "Agent 工具执行失败: userId={}, sessionId={}, tool={}, callId={}, error={}",
+                        userId,
+                        sessionId,
+                        event.getToolCallName(),
+                        event.getToolCallId(),
+                        errorTexts.getOrDefault(event.getToolCallId(), new StringBuilder())));
     }
 
     private String buildPrompt(AgentRequest request) {

@@ -1,6 +1,6 @@
 import { ArrowRightOutlined } from '@ant-design/icons';
 import { Button, Input, Select } from 'antd';
-import type { KeyboardEvent } from 'react';
+import { useRef, type KeyboardEvent } from 'react';
 import type { DraftParams } from '@/stores/draftStore';
 
 interface PromptComposerProps {
@@ -37,8 +37,14 @@ const DURATION_OPTIONS = [
 ];
 
 const RESOLUTION_OPTIONS = [
+  { value: '480p', label: '480p' },
   { value: '720p', label: '720p' },
   { value: '1080p', label: '1080p' },
+];
+
+const AUDIO_OPTIONS = [
+  { value: true, label: '有声' },
+  { value: false, label: '无声' },
 ];
 
 export default function PromptComposer({
@@ -51,15 +57,35 @@ export default function PromptComposer({
   onParamsChange,
   onGenerate,
 }: PromptComposerProps) {
+  const composingRef = useRef(false);
+  const compositionEndAtRef = useRef(0);
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey) {
       return;
     }
-    if (event.nativeEvent.isComposing) {
+
+    const nativeEvent = event.nativeEvent;
+    const recentlyFinishedComposition = Date.now() - compositionEndAtRef.current < 100;
+    if (
+      composingRef.current ||
+      nativeEvent.isComposing ||
+      nativeEvent.keyCode === 229 ||
+      recentlyFinishedComposition
+    ) {
       return;
     }
     event.preventDefault();
     onGenerate();
+  };
+
+  const handleCompositionStart = () => {
+    composingRef.current = true;
+  };
+
+  const handleCompositionEnd = () => {
+    composingRef.current = false;
+    compositionEndAtRef.current = Date.now();
   };
 
   return (
@@ -69,6 +95,8 @@ export default function PromptComposer({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={handleCompositionEnd}
         placeholder="描述你想看到的画面：海边日落，镜头缓慢推进，暖色调，海浪拍打礁石……"
         autoSize={{ minRows: 2, maxRows: 7 }}
         maxLength={2000}
@@ -115,6 +143,16 @@ export default function PromptComposer({
               popupMatchSelectWidth={false}
               aria-label="分辨率"
               onChange={(resolution) => onParamsChange({ resolution })}
+            />
+          </span>
+          <span className="composer-param">
+            <Select
+              value={params.generateAudio}
+              options={AUDIO_OPTIONS}
+              variant="borderless"
+              popupMatchSelectWidth={false}
+              aria-label="声音"
+              onChange={(generateAudio) => onParamsChange({ generateAudio })}
             />
           </span>
         </div>

@@ -89,6 +89,7 @@ app:
     access-key: ${MINIO_ACCESS_KEY:minioadmin}
     secret-key: ${MINIO_SECRET_KEY:minioadmin}
     bucket: ${MINIO_BUCKET:aivideo}
+    presigned-ttl: ${MINIO_PRESIGNED_TTL:PT15M}
   agentscope:
     # 默认关闭：使用 Mock ModelProvider，不发起真实模型调用
     enabled: ${AGENTSCOPE_ENABLED:false}
@@ -106,11 +107,34 @@ app:
     confirm-timeout: ${AGENTSCOPE_CONFIRM_TIMEOUT:PT5M}
     sys-prompt: >-
       你是 AI Video Studio 的视频创作助手。你擅长把用户的创意拆解为剧本、分镜和镜头参数。
-      当用户明确要求生成视频、短片或镜头时，必须调用工具 generateVideoClip，
-      并传入 prompt 与 durationSeconds；当用户要求分镜或剧本时，调用 generateStoryboard。
-      不要仅用文字描述代替工具调用。
-      工具调用可能触发用户确认；如果用户拒绝，请说明未执行并给出替代建议。
-      当前视频生成能力为占位实现，结果中请明确告知用户。
+      当用户要求生成视频、短片或镜头时，先调用 proposeVideoPrompt，
+      提供 originalPrompt、optimizedPrompt 和 3-5 条可展示的 analysisSteps。
+      优化提示词必须保留用户原意，分析步骤只描述理解、补全和镜头设计，不要输出隐藏思维链。
+      这一阶段绝对不要调用 generateVideoClip；用户会选择原版或优化版并再次确认后，由系统调用视频工具。
+      当用户要求分镜或剧本时，调用 generateStoryboard。
+  video:
+    # mock | seedance。dev 默认 mock；接入真实 Seedance 时切换为 seedance。
+    provider: ${VIDEO_PROVIDER:mock}
+    seedance:
+      api-key: ${ARK_API_KEY:}
+      base-url: ${SEEDANCE_BASE_URL:https://ark.cn-beijing.volces.com/api/v3}
+      model: ${SEEDANCE_MODEL:doubao-seedance-2-5-260628}
+      request-timeout: ${SEEDANCE_REQUEST_TIMEOUT:PT15S}
+      # polling | callback | hybrid；本地默认 polling，生产推荐 hybrid。
+      status-sync-mode: ${SEEDANCE_STATUS_SYNC_MODE:polling}
+      poll-interval: ${SEEDANCE_POLL_INTERVAL:PT5S}
+      callback-fallback-interval: ${SEEDANCE_CALLBACK_FALLBACK_INTERVAL:PT2M}
+      callback-base-url: ${SEEDANCE_CALLBACK_BASE_URL:}
+      callback-secret: ${SEEDANCE_CALLBACK_SECRET:}
+      max-submit-attempts: ${SEEDANCE_MAX_SUBMIT_ATTEMPTS:3}
+      max-batch-size: ${SEEDANCE_MAX_BATCH_SIZE:20}
+      worker-lease: ${SEEDANCE_WORKER_LEASE:PT2M}
+      pricing-version: ${SEEDANCE_PRICING_VERSION:seedance-2.5-2026-11}
+      pricing:
+        doubao-seedance-2-5-260628:
+          480p: ${SEEDANCE_PRICE_480P:70.00}
+          720p: ${SEEDANCE_PRICE_720P:70.00}
+          1080p: ${SEEDANCE_PRICE_1080P:77.00}
 
 logging:
   level:

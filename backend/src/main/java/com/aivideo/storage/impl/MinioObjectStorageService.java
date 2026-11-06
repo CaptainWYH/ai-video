@@ -2,45 +2,95 @@ package com.aivideo.storage.impl;
 
 import com.aivideo.storage.ObjectStorageService;
 import com.aivideo.storage.StorageProperties;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import io.minio.BucketExistsArgs;
+import io.minio.GetPresignedObjectUrlArgs;
+import io.minio.MakeBucketArgs;
+import io.minio.MinioClient;
+import io.minio.PutObjectArgs;
+import io.minio.http.Method;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
+import java.io.InputStream;
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
 /**
- * MinIO/S3 占位实现。
- *
- * <p>TODO: 接入 MinIO Java SDK 或 AWS S3 SDK：
- * <ul>
- *   <li>初始化 MinioClient（endpoint/accessKey/secretKey）；</li>
- *   <li>upload 调用 putObject，并设置 Content-Type；</li>
- *   <li>presignedUrl 调用 getPresignedObjectUrl，设置过期时间。</li>
- * </ul>
+ * MinIO 对象存储实现。视频以流式方式上传，避免将大文件整体载入内存。
  */
-@Slf4j
 @Service
-@RequiredArgsConstructor
 public class MinioObjectStorageService implements ObjectStorageService {
 
+    private static final long PART_SIZE = 10L * 1024 * 1024;
+
     private final StorageProperties properties;
+    private final MinioClient client;
+    private volatile boolean bucketReady;
+
+    public MinioObjectStorageService(StorageProperties properties) {
+        this.properties = properties;
+        if (!StringUtils.hasText(properties.getEndpoint())) {
+            throw new IllegalStateException("MinIO endpoint 不能为空");
+        }
+        this.client = MinioClient.builder()
+                .endpoint(properties.getEndpoint())
+                .credentials(properties.getAccessKey(), properties.getSecretKey())
+                .build();
+    }
 
     @Override
-    public String upload(byte[] content, String objectKey, String contentType) {
-        // TODO 真实上传逻辑，本阶段仅返回占位 URL，不写文件。
-        log.info("对象存储占位调用: bucket={}, key={}, contentType={}, size={}",
-                properties.getBucket(), objectKey, contentType,
-                content == null ? 0 : content.length);
-        return mockUrl(objectKey);
+    public String upload(InputStream content, long contentLength, String objectKey, String contentType) {
+        ensureBucket();
+        try {
+            client.putObject(PutObjectArgs.builder()
+                    .bucket(properties.getBucket())
+                    .object(objectKey)
+                    .stream(content, contentLength, PART_SIZE)
+                    .contentType(contentType)
+                    .build());
+            return objectKey;
+        } catch (Exception ex) {
+            throw new IllegalStateException("上传视频到 MinIO 失败: " + objectKey, ex);
+        }
     }
 
     @Override
     public String presignedUrl(String objectKey, Duration ttl) {
-        // TODO 使用 SDK 生成预签名 URL。
-        return mockUrl(objectKey) + "?expires=" + ttl.toSeconds();
+        ensureBucket();
+        try {
+            return client.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+                    .method(Method.GET)
+                    .bucket(properties.getBucket())
+                    .object(objectKey)
+                    .expiry((int) Math.min(Integer.MAX_VALUE, Math.max(1, ttl.toSeconds())),
+                            TimeUnit.SECONDS)
+                    .build());
+        } catch (Exception ex) {
+            throw new IllegalStateException("生成 MinIO 预签名地址失败: " + objectKey, ex);
+        }
     }
 
-    private String mockUrl(String objectKey) {
-        return properties.getEndpoint() + "/" + properties.getBucket() + "/" + objectKey;
+    private void ensureBucket() {
+        if (bucketReady) {
+            return;
+        }
+        synchronized (this) {
+            if (bucketReady) {
+                return;
+            }
+            try {
+                boolean exists = client.bucketExists(BucketExistsArgs.builder()
+                        .bucket(properties.getBucket())
+                        .build());
+                if (!exists) {
+                    client.makeBucket(MakeBucketArgs.builder()
+                            .bucket(properties.getBucket())
+                            .build());
+                }
+                bucketReady = true;
+            } catch (Exception ex) {
+                throw new IllegalStateException("初始化 MinIO bucket 失败: " + properties.getBucket(), ex);
+            }
+        }
     }
 }

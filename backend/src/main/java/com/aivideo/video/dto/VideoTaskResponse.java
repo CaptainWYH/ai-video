@@ -6,7 +6,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
 @Data
 @Builder
@@ -17,11 +16,16 @@ public class VideoTaskResponse {
     private Long id;
     private Long projectId;
     private String prompt;
-    private Map<String, Object> params;
+    private VideoGenerationParams params;
     private String status;
     private Integer progress;
+    private String provider;
+    private String providerModel;
+    private String providerStatus;
     private String resultUrl;
     private String errorMessage;
+    private VideoUsageResponse usage;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDateTime completedAt;
 }
